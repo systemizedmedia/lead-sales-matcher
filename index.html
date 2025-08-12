@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Lead ⇄ Sales Matcher</title>
+  <title>Lead ⇄ Sales Matcher (Upgraded)</title>
   <!-- Tailwind (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
@@ -51,7 +51,17 @@
     }
 
     // ===== Normalizers =====
-    const normalizeEmail = (e) => (e || '').toString().trim().toLowerCase();
+    const firstItem = (s) => (s||'').toString().split(/[;,]/)[0].trim();
+    const normalizeEmail = (e) => {
+      const raw = firstItem(e).toLowerCase();
+      if (!raw) return '';
+      const [local, domain] = raw.split('@');
+      if (!domain) return raw;
+      if (domain === 'gmail.com') {
+        return `${local.replace(/\./g, '')}@${domain}`;
+      }
+      return `${local}@${domain}`;
+    };
     const normalizePhone = (p) => (p || '').toString().replace(/\D+/g, '').replace(/^1(\d{10})$/, '$1');
     const normalizeName  = (n) => (n || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
 
@@ -60,6 +70,43 @@
       const key = raw.toLowerCase();
       if (aliasMap && aliasMap.has(key)) return aliasMap.get(key);
       return raw || 'Unknown';
+    }
+
+    // ===== Similarity (Jaro-Winkler) for fuzzy name matching =====
+    function jaro(a, b) {
+      if (!a || !b) return 0;
+      if (a === b) return 1;
+      const mtp = []; // matches, transpositions, prefix
+      const matchWindow = Math.floor(Math.max(a.length, b.length) / 2) - 1;
+      const aMatches = new Array(a.length).fill(false);
+      const bMatches = new Array(b.length).fill(false);
+      let matches = 0;
+      for (let i = 0; i < a.length; i++) {
+        const start = Math.max(0, i - matchWindow);
+        const end = Math.min(i + matchWindow + 1, b.length);
+        for (let j = start; j < end; j++) {
+          if (bMatches[j]) continue;
+          if (a[i] !== b[j]) continue;
+          aMatches[i] = true; bMatches[j] = true; matches++; break;
+        }
+      }
+      if (matches === 0) return 0;
+      let t = 0, k = 0;
+      for (let i = 0; i < a.length; i++) {
+        if (!aMatches[i]) continue;
+        while (!bMatches[k]) k++;
+        if (a[i] !== b[k]) t++;
+        k++;
+      }
+      const m = matches;
+      const jaro = (m / a.length + m / b.length + (m - t/2) / m) / 3;
+      return jaro;
+    }
+    function jaroWinkler(a, b, p = 0.1, maxL = 4) {
+      const j = jaro(a, b);
+      let l = 0;
+      for (; l < Math.min(maxL, a.length, b.length) && a[l] === b[l]; l++);
+      return j + l * p * (1 - j);
     }
 
     // ===== Utils =====
@@ -81,65 +128,12 @@
       document.body.removeChild(a); URL.revokeObjectURL(url);
     }
 
-    // ===== Components =====
-    function FilePicker({ label, onLoad }) {
-      const handle = async (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const text = await file.text();
-        const rows = parseCSV(text);
-        const objs = toObjects(rows);
-        onLoad({ fileName: file.name, headers: rows[0], data: objs });
-      };
-      return (
-        <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium text-gray-700">{label}</label>
-          <input type="file" accept=".csv" onChange={handle} className="block w-full text-sm text-gray-700" />
-          <p className="text-xs text-gray-500">CSV only. Data stays in your browser.</p>
-        </div>
-      );
-    }
-
-    function Select({ label, value, onChange, options }) {
-      return (
-        <div className="flex flex-col gap-1 min-w-[180px]">
-          <label className="text-xs text-gray-600">{label}</label>
-          <select value={value} onChange={(e) => onChange(e.target.value)} className="rounded-xl border px-3 py-2 text-sm">
-            <option value="">— Select —</option>
-            {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-          </select>
-        </div>
-      );
-    }
-
-    function SummaryCard({ title, value, sub }) {
-      return (
-        <div className="rounded-2xl border p-4 shadow-sm bg-white">
-          <div className="text-sm text-gray-500">{title}</div>
-          <div className="text-2xl font-semibold">{value}</div>
-          {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
-        </div>
-      );
-    }
-
-    function groupByPlatformSummary(matches, platformKey, revenueKey, normalizer) {
-      const map = new Map();
-      matches.forEach(m => {
-        const raw = (m.lead?.[platformKey] ?? '').toString();
-        const platform = (normalizer ? normalizer(raw) : raw) || 'Unknown';
-        const revenueRaw = m.sale?.[revenueKey];
-        const revenue = parseFloat((revenueRaw ?? '').toString().replace(/[^0-9.\-]/g, '')) || 0;
-        if (!map.has(platform)) map.set(platform, { platform, leads: 0, revenue: 0 });
-        const obj = map.get(platform);
-        obj.leads += 1; obj.revenue += revenue;
-      });
-      return Array.from(map.values()).sort((a,b) => b.revenue - a.revenue);
-    }
-
-    function matchRecords({ sales, leads, mapSales, mapLeads }) {
+    // ===== Matching =====
+    function matchRecords({ sales, leads, mapSales, mapLeads, options }) {
       const emailIdx = new Map(), phoneIdx = new Map(), nameIdx = new Map();
-      const sEmail = mapSales.email, sPhone = mapSales.phone, sName = mapSales.name;
+      const sEmail = mapSales.email, sPhone = mapSales.phone, sName = mapSales.name, sRev = mapSales.revenue;
 
+      // index sales
       sales.forEach(s => {
         const e = normalizeEmail(s[sEmail]);
         const p = normalizePhone(s[sPhone]);
@@ -150,22 +144,75 @@
       });
 
       const lEmail = mapLeads.email, lPhone = mapLeads.phone, lName = mapLeads.name;
-      const matches = [];
+      const matches = []; const unmatchedLeads = [];
 
       leads.forEach(lead => {
         const le = normalizeEmail(lead[lEmail]);
         const lp = normalizePhone(lead[lPhone]);
         const ln = normalizeName(lead[lName]);
 
-        let sale = null; const matchedOn = [];
-        if (!sale && le && emailIdx.has(le)) { sale = emailIdx.get(le); matchedOn.push('email'); }
-        if (!sale && lp && phoneIdx.has(lp)) { sale = phoneIdx.get(lp); matchedOn.push('phone'); }
-        if (!sale && ln && nameIdx.has(ln))  { sale = nameIdx.get(ln); matchedOn.push('name'); }
+        let sale = null; let matchedOn = []; let confidence = 0;
 
-        if (sale) matches.push({ lead, sale, matchedOn: matchedOn.join('|') });
+        if (!sale && le && emailIdx.has(le)) { sale = emailIdx.get(le); matchedOn.push('email'); confidence = 1; }
+        if (!sale && lp && phoneIdx.has(lp)) { sale = phoneIdx.get(lp); matchedOn.push('phone'); confidence = 1; }
+        if (!sale && ln && nameIdx.has(ln))  { sale = nameIdx.get(ln);  matchedOn.push('name');  confidence = 0.98; }
+
+        // Fuzzy name fallback
+        if (!sale && options?.enableFuzzy && ln) {
+          let best = { s: null, score: 0 };
+          // simple sweep through name index (could be optimized w/ blocking by first char)
+          nameIdx.forEach((sObj, nameKey) => {
+            const score = jaroWinkler(ln, nameKey);
+            if (score > best.score) best = { s: sObj, score };
+          });
+          if (best.score >= (options.nameThreshold ?? 0.9)) {
+            sale = best.s; matchedOn.push('name_fuzzy'); confidence = Number(best.score.toFixed(3));
+          }
+        }
+
+        if (sale) {
+          const rev = (sale?.[sRev] ?? '').toString();
+          matches.push({ lead, sale, matchedOn: matchedOn.join('|'), confidence });
+        } else {
+          unmatchedLeads.push(lead);
+        }
       });
 
-      return matches;
+      // Compute unmatched sales (those never used in any match)
+      const usedSales = new Set(matches.map(m => m.sale));
+      const unmatchedSales = sales.filter(s => !usedSales.has(s));
+
+      return { matches, unmatchedLeads, unmatchedSales };
+    }
+
+    // ===== De-dup helpers =====
+    function makeSaleKeyFactory(sEmail, sPhone, sName, sRevenue) {
+      return function saleKey(saleObj) {
+        const e = normalizeEmail(saleObj?.[sEmail]);
+        const p = normalizePhone(saleObj?.[sPhone]);
+        const n = normalizeName(saleObj?.[sName]);
+        const rev = (saleObj?.[sRevenue] ?? '').toString().replace(/[^0-9.\-]/g, '');
+        return JSON.stringify([e, p, n, rev]);
+      };
+    }
+
+    function groupByPlatformSummaryDedup(matches, platformKey, revenueKey, saleKeyFn, normalizer) {
+      const map = new Map();
+      const seenSales = new Set();
+      matches.forEach(m => {
+        const raw = (m.lead?.[platformKey] ?? '').toString();
+        const platform = (normalizer ? normalizer(raw) : raw) || 'Unknown';
+        const revenueRaw = m.sale?.[revenueKey];
+        const revenue = parseFloat((revenueRaw ?? '').toString().replace(/[^0-9.\-]/g, '')) || 0;
+
+        if (!map.has(platform)) map.set(platform, { platform, leads: 0, revenue: 0 });
+        const obj = map.get(platform);
+        obj.leads += 1;
+
+        const k = saleKeyFn(m.sale);
+        if (!seenSales.has(k)) { obj.revenue += revenue; seenSales.add(k); }
+      });
+      return Array.from(map.values()).sort((a,b) => b.revenue - a.revenue);
     }
 
     function App() {
@@ -186,10 +233,12 @@
       const [lName, setLName] = useState("");
       const [lPlatform, setLPlatform] = useState("");
 
+      // Fuzzy options
+      const [enableFuzzy, setEnableFuzzy] = useState(true);
+      const [nameThreshold, setNameThreshold] = useState(0.9);
+
       // Platform aliases (editable)
-      const defaultAliasText = `Facebook: fb, facebook
-TikTok: tt, tiktok
-YouTube: yt, youtube`;
+      const defaultAliasText = `Facebook: fb, facebook\nTikTok: tt, tiktok\nYouTube: yt, youtube`;
       const [aliasText, setAliasText] = useState(defaultAliasText);
       const aliasMap = useMemo(() => {
         const map = new Map();
@@ -207,30 +256,43 @@ YouTube: yt, youtube`;
       const ready = salesFile && leadsFile && sRevenue && lPlatform &&
         (sEmail || sPhone || sName) && (lEmail || lPhone || lName);
 
-      const matches = useMemo(() => {
-        if (!ready) return [];
+      const { matches, unmatchedLeads, unmatchedSales } = useMemo(() => {
+        if (!ready) return { matches: [], unmatchedLeads: [], unmatchedSales: [] };
         return matchRecords({
           sales: salesFile.data,
           leads: leadsFile.data,
-          mapSales: { email: sEmail, phone: sPhone, name: sName },
+          mapSales: { email: sEmail, phone: sPhone, name: sName, revenue: sRevenue },
           mapLeads: { email: lEmail, phone: lPhone, name: lName },
+          options: { enableFuzzy, nameThreshold }
         });
-      }, [ready, salesFile, leadsFile, sEmail, sPhone, sName, lEmail, lPhone, lName]);
+      }, [ready, salesFile, leadsFile, sEmail, sPhone, sName, sRevenue, lEmail, lPhone, lName, enableFuzzy, nameThreshold]);
+
+      const saleKey = useMemo(() => makeSaleKeyFactory(sEmail, sPhone, sName, sRevenue), [sEmail, sPhone, sName, sRevenue]);
 
       const platformSummary = useMemo(() => {
         if (!ready) return [];
         const normalizer = (raw) => normalizePlatformRaw(raw, aliasMap);
-        return groupByPlatformSummary(matches, lPlatform, sRevenue, normalizer);
-      }, [matches, ready, lPlatform, sRevenue, aliasMap]);
+        return groupByPlatformSummaryDedup(matches, lPlatform, sRevenue, saleKey, normalizer);
+      }, [matches, ready, lPlatform, sRevenue, aliasMap, saleKey]);
 
-      const totalRevenue = useMemo(
-        () => platformSummary.reduce((acc, r) => acc + r.revenue, 0),
-        [platformSummary]
-      );
+      const totalRevenue = useMemo(() => {
+        const seen = new Set();
+        let sum = 0;
+        matches.forEach(m => {
+          const k = saleKey(m.sale);
+          if (!seen.has(k)) {
+            const revenue = parseFloat((m.sale?.[sRevenue] ?? '').toString().replace(/[^0-9.\-]/g, '')) || 0;
+            sum += revenue;
+            seen.add(k);
+          }
+        });
+        return sum;
+      }, [matches, sRevenue, saleKey]);
 
       const downloadMatches = () => {
         const rows = matches.map(m => ({
           matched_on: m.matchedOn,
+          confidence: m.confidence,
           platform: normalizePlatformRaw((m.lead?.[lPlatform] ?? '').toString(), aliasMap),
           revenue: m.sale?.[sRevenue] ?? '',
           lead_email: m.lead?.[lEmail] ?? '',
@@ -252,16 +314,34 @@ YouTube: yt, youtube`;
         downloadCSV('platform_summary.csv', rows);
       };
 
+      const downloadUnmatched = () => {
+        const leadRows = unmatchedLeads.map(l => ({
+          lead_email: l[lEmail] ?? '',
+          lead_phone: l[lPhone] ?? '',
+          lead_name: l[lName] ?? '',
+          platform: l[lPlatform] ?? ''
+        }));
+        downloadCSV('unmatched_leads.csv', leadRows);
+
+        const saleRows = unmatchedSales.map(s => ({
+          sale_email: s[sEmail] ?? '',
+          sale_phone: s[sPhone] ?? '',
+          sale_name: s[sName] ?? '',
+          revenue: s[sRevenue] ?? ''
+        }));
+        downloadCSV('unmatched_sales.csv', saleRows);
+      };
+
       return (
-        <div className="max-w-6xl mx-auto p-6">
+        <div className="max-w-7xl mx-auto p-6">
           <header className="mb-6">
-            <h1 className="text-2xl md:text-3xl font-bold">Lead ⇄ Sales Matcher</h1>
-            <p className="text-sm text-gray-600 mt-1">ServiceTitan sales ↔ Lead DB (platform attribution & revenue). All in-browser.</p>
+            <h1 className="text-2xl md:text-3xl font-bold">Lead ⇄ Sales Matcher <span className="text-gray-400">(Upgraded)</span></h1>
+            <p className="text-sm text-gray-600 mt-1">Smarter matching, de-duped revenue, exports, and fuzzy name matching.</p>
           </header>
 
           <div className="grid md:grid-cols-2 gap-6 mb-6">
             <div className="rounded-2xl border p-4 bg-white">
-              <h2 className="font-semibold mb-3">1) Upload ServiceTitan Sales CSV</h2>
+              <h2 className="font-semibold mb-3">1) Upload Sales CSV</h2>
               <FilePicker label="Sales CSV" onLoad={setSalesFile} />
               {salesFile && (
                 <div className="mt-3 text-xs text-gray-600">
@@ -294,7 +374,21 @@ YouTube: yt, youtube`;
           </div>
 
           <div className="rounded-2xl border p-4 bg-white mb-6">
-            <h2 className="font-semibold mb-2">3) Platform Aliases (optional)</h2>
+            <h2 className="font-semibold mb-2">3) Matching Options</h2>
+            <div className="grid md:grid-cols-3 gap-4 text-sm">
+              <div className="flex items-center gap-2">
+                <input id="fuzzy" type="checkbox" checked={enableFuzzy} onChange={(e)=>setEnableFuzzy(e.target.checked)} />
+                <label htmlFor="fuzzy">Enable fuzzy name matching</label>
+              </div>
+              <div className="col-span-2 flex items-center gap-3">
+                <label className="whitespace-nowrap">Name threshold: {nameThreshold.toFixed(2)}</label>
+                <input type="range" min="0.80" max="0.99" step="0.01" value={nameThreshold} onChange={(e)=>setNameThreshold(parseFloat(e.target.value))} className="w-full" />
+              </div>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border p-4 bg-white mb-6">
+            <h2 className="font-semibold mb-2">4) Platform Aliases (optional)</h2>
             <p className="text-xs text-gray-600 mb-2">
               Map abbreviations to a canonical name. One line per platform. Format: <code>Canonical: alias1, alias2</code>
             </p>
@@ -304,18 +398,18 @@ YouTube: yt, youtube`;
               className="w-full rounded-xl border p-3 text-sm font-mono min-h-[110px]"
             />
             <div className="text-xs text-gray-500 mt-2">
-              Examples included for Facebook/FB, TikTok/TT, YouTube/YT. Add your own (e.g., <em>Google: gads, google ads, sem</em>).
+              Examples for Facebook/FB, TikTok/TT, YouTube/YT. Add your own (e.g., <em>Google: gads, google ads, sem</em>).
             </div>
           </div>
 
           <div className="flex flex-wrap gap-4 mb-6">
-            <SummaryCard title="Files" value={(salesFile ? 1 : 0) + (leadsFile ? 1 : 0) + "/2"} sub="Uploads ready" />
+            <SummaryCard title="Files" value={(salesFile ? 1 : 0) + (leadsFile ? 1 : 0) + "/2" sub="Uploads ready" />
             <SummaryCard title="Matches" value={matches.length.toLocaleString()} sub="Lead ↔︎ Sale pairs" />
             <SummaryCard title="Platforms" value={platformSummary.length.toLocaleString()} sub="With at least one match" />
-            <SummaryCard title="Revenue (All)" value={`$${totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} sub="Summed from matched sales" />
+            <SummaryCard title="Revenue (All)" value={`$${totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} sub="De-duped: each sale counted once" />
           </div>
 
-          <div className="mb-4 flex gap-3">
+          <div className="mb-4 flex flex-wrap gap-3">
             <button
               disabled={!ready || matches.length === 0}
               onClick={downloadMatches}
@@ -330,12 +424,19 @@ YouTube: yt, youtube`;
             >
               Download Platform Summary CSV
             </button>
+            <button
+              disabled={!ready}
+              onClick={downloadUnmatched}
+              className={`px-4 py-2 rounded-xl text-sm font-medium shadow-sm ${!ready ? 'bg-gray-200 text-gray-500' : 'bg-white text-gray-900 border'}`}
+            >
+              Download Unmatched (Leads & Sales)
+            </button>
           </div>
 
           <div className="rounded-2xl border bg-white">
             <div className="p-4 border-b flex items-center justify-between">
               <h3 className="font-semibold">Platform Summary</h3>
-              <div className="text-xs text-gray-500">Grouped by lead platform with revenue sum</div>
+              <div className="text-xs text-gray-500">Grouped by lead platform with revenue sum (de-duped by sale)</div>
             </div>
             <div className="p-4 overflow-x-auto">
               <table className="min-w-full text-sm">
@@ -372,6 +473,7 @@ YouTube: yt, youtube`;
                 <thead>
                   <tr className="text-left text-gray-600">
                     <th className="px-3 py-2">Matched On</th>
+                    <th className="px-3 py-2">Conf.</th>
                     <th className="px-3 py-2">Platform</th>
                     <th className="px-3 py-2">Revenue</th>
                     <th className="px-3 py-2">Lead Email</th>
@@ -386,6 +488,7 @@ YouTube: yt, youtube`;
                   {matches.slice(0,200).map((m, idx) => (
                     <tr key={idx} className="border-t">
                       <td className="px-3 py-2">{m.matchedOn}</td>
+                      <td className="px-3 py-2">{(m.confidence ?? '').toString()}</td>
                       <td className="px-3 py-2">{normalizePlatformRaw((m.lead?.[lPlatform] ?? '').toString(), aliasMap)}</td>
                       <td className="px-3 py-2">{(m.sale?.[sRevenue] ?? '').toString()}</td>
                       <td className="px-3 py-2">{(m.lead?.[lEmail] ?? '').toString()}</td>
@@ -397,7 +500,7 @@ YouTube: yt, youtube`;
                     </tr>
                   ))}
                   {matches.length === 0 && (
-                    <tr><td className="px-3 py-6 text-gray-500" colSpan={9}>No matches yet.</td></tr>
+                    <tr><td className="px-3 py-6 text-gray-500" colSpan={10}>No matches yet.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -408,6 +511,47 @@ YouTube: yt, youtube`;
             <p>Tips: Ensure both CSVs include at least one of Email, Phone, or Name. Revenue should be numeric (e.g., 1250 or $1,250.00). Platform comes from your Lead DB.</p>
             <p className="mt-2">Privacy: All processing happens in your browser. No data is uploaded to any server.</p>
           </footer>
+        </div>
+      );
+    }
+
+    // ===== Reusable UI components =====
+    function FilePicker({ label, onLoad }) {
+      const handle = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const text = await file.text();
+        const rows = parseCSV(text);
+        const objs = toObjects(rows);
+        onLoad({ fileName: file.name, headers: rows[0], data: objs });
+      };
+      return (
+        <div className="flex flex-col gap-2">
+          <label className="text-sm font-medium text-gray-700">{label}</label>
+          <input type="file" accept=".csv" onChange={handle} className="block w-full text-sm text-gray-700" />
+          <p className="text-xs text-gray-500">CSV only. Data stays in your browser.</p>
+        </div>
+      );
+    }
+
+    function Select({ label, value, onChange, options }) {
+      return (
+        <div className="flex flex-col gap-1 min-w-[180px]">
+          <label className="text-xs text-gray-600">{label}</label>
+          <select value={value} onChange={(e) => onChange(e.target.value)} className="rounded-xl border px-3 py-2 text-sm">
+            <option value="">— Select —</option>
+            {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+          </select>
+        </div>
+      );
+    }
+
+    function SummaryCard({ title, value, sub }) {
+      return (
+        <div className="rounded-2xl border p-4 shadow-sm bg-white">
+          <div className="text-sm text-gray-500">{title}</div>
+          <div className="text-2xl font-semibold">{value}</div>
+          {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
         </div>
       );
     }
