@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Lead ⇄ Sales Matcher — Offline</title>
+  <title>Lead ⇄ Sales Matcher — Offline v2</title>
   <style>
     :root{--bg:#f7f7f8;--card:#fff;--fg:#0f172a;--muted:#64748b;--border:#e5e7eb;--accent:#111827}
     *{box-sizing:border-box}
@@ -40,8 +40,8 @@
 </head>
 <body>
   <div class="wrap">
-    <h1>Lead ⇄ Sales Matcher <span class="pill">Offline</span></h1>
-    <div class="sub">Smarter matching, de-duped revenue, exports — all client-side, no CDNs.</div>
+    <h1>Lead ⇄ Sales Matcher <span class="pill">Offline v2</span></h1>
+    <div class="sub">Strict filtering when fuzzy is OFF + smart platform grouping.</div>
 
     <div class="grid grid-2">
       <div class="card">
@@ -102,7 +102,7 @@
     <div class="card" style="margin-top:16px">
       <div class="hd"><strong>4) Platform Aliases (optional)</strong></div>
       <div class="bd">
-        <div class="hint" style="margin-bottom:8px">Map abbreviations to a canonical name. One line per platform. Format: <code>Canonical: alias1, alias2</code></div>
+        <div class="hint" style="margin-bottom:8px">Substring bucketing is built-in for Facebook/YouTube/TikTok; alias map is secondary. Format per line: <code>Canonical: alias1, alias2</code></div>
         <textarea id="aliasText">Facebook: fb, facebook
 TikTok: tt, tiktok
 YouTube: yt, youtube</textarea>
@@ -171,22 +171,22 @@ YouTube: yt, youtube</textarea>
     function toObjects(rows){if(!rows||!rows.length)return[];const headers=rows[0].map(h=>h.trim());return rows.slice(1).filter(r=>r.some(x=>(x??'').toString().trim()!=='')) .map(r=>{const o={};headers.forEach((h,idx)=>o[h]=r[idx]??'');return o})}
 
     // ===== Normalizers =====
-    const firstItem = (s)=> (s||'').toString().split(/[;,]/)[0].trim();
+    const firstItem=(s)=>(s||'').toString().split(/[;,]/)[0].trim();
     function normalizeEmail(e){const raw=firstItem(e).toLowerCase();if(!raw) return '';const parts=raw.split('@');if(parts.length<2) return raw;const local=parts[0],domain=parts[1];if(domain==='gmail.com'){return local.replace(/\./g,'')+'@'+domain}return local+'@'+domain}
     function normalizePhone(p){return (p||'').toString().replace(/\D+/g,'').replace(/^1(\d{10})$/,'$1')}
     function normalizeName(n){return (n||'').toString().trim().toLowerCase().replace(/\s+/g,' ')}
-    function normalizePlatformRaw(p, aliasMap){
-  const raw = (p||'').toString().trim();
-  const key = raw.toLowerCase();
-  if (!key) return 'Unknown';
-  // Substring/keyword grouping (case-insensitive)
-  if (/facebook|fb/i.test(raw)) return 'Facebook';
-  if (/youtube|yt/i.test(raw)) return 'YouTube';
-  if (/tiktok|tt/i.test(raw)) return 'TikTok';
-  // Exact alias map fallback
-  if (aliasMap && aliasMap.has(key)) return aliasMap.get(key);
-  return raw;
-}
+
+    // Substring/keyword grouping for platforms (case-insensitive)
+    function normalizePlatformRaw(p, map){
+      const raw=(p||'').toString().trim();
+      if(!raw) return 'Unknown';
+      if(/facebook|\bfb\b/i.test(raw)) return 'Facebook';
+      if(/youtube|\byt\b/i.test(raw)) return 'YouTube';
+      if(/tiktok|\btt\b/i.test(raw)) return 'TikTok';
+      const key=raw.toLowerCase();
+      if(map && map.has(key)) return map.get(key);
+      return raw;
+    }
 
     // ===== Similarity (Jaro/Winkler) =====
     function jaro(a,b){if(!a||!b) return 0;if(a===b) return 1;const mw=Math.floor(Math.max(a.length,b.length)/2)-1;const aM=new Array(a.length).fill(false),bM=new Array(b.length).fill(false);let m=0;for(let i=0;i<a.length;i++){const start=Math.max(0,i-mw),end=Math.min(i+mw+1,b.length);for(let j=start;j<end;j++){if(bM[j]) continue;if(a[i]!==b[j]) continue;aM[i]=true;bM[j]=true;m++;break}} if(m===0) return 0;let t=0,k=0;for(let i=0;i<a.length;i++){if(!aM[i]) continue;while(!bM[k]) k++;if(a[i]!==b[k]) t++;k++}return (m/a.length + m/b.length + (m - t/2)/m)/3}
@@ -203,13 +203,13 @@ YouTube: yt, youtube</textarea>
     // ===== Global state =====
     const state={sales:{file:null,rows:[],headers:[]},leads:{file:null,rows:[],headers:[]}};
 
-    // ===== Index + Match =====
+    // ===== Matching =====
     function matchRecords({sales,leads,mapSales,mapLeads,options}){
       const emailIdx=new Map(),phoneIdx=new Map(),nameIdx=new Map();
-      const sEmail=mapSales.email,sPhone=mapSales.phone,sName=mapSales.name,sRev=mapSales.revenue;
+      const sEmail=mapSales.email,sPhone=mapSales.phone,sName=mapSales.name;
       sales.forEach(s=>{const e=normalizeEmail(s[sEmail]),p=normalizePhone(s[sPhone]),n=normalizeName(s[sName]);if(e) emailIdx.set(e,s);if(p) phoneIdx.set(p,s);if(n) nameIdx.set(n,s)});
       const lEmail=mapLeads.email,lPhone=mapLeads.phone,lName=mapLeads.name;
-      const matches=[],unmatchedLeads=[];
+      const matches=[];
       leads.forEach(lead=>{
         const le=normalizeEmail(lead[lEmail]),lp=normalizePhone(lead[lPhone]),ln=normalizeName(lead[lName]);
         let sale=null,matchedOn=[],confidence=0;
@@ -217,11 +217,9 @@ YouTube: yt, youtube</textarea>
         if(!sale && lp && phoneIdx.has(lp)){sale=phoneIdx.get(lp);matchedOn.push('phone');confidence=1}
         if(!sale && ln && nameIdx.has(ln)){sale=nameIdx.get(ln);matchedOn.push('name');confidence=1}
         if(!sale && options.enableFuzzy && ln){let best={s:null,score:0};nameIdx.forEach((sObj,nameKey)=>{const sc=jaroWinkler(ln,nameKey);if(sc>best.score) best={s:sObj,score:sc}}); if(best.score>=(options.nameThreshold||0.9)){sale=best.s;matchedOn.push('name_fuzzy');confidence=+best.score.toFixed(3)}}
-        if(sale){matches.push({lead,sale,matchedOn:matchedOn.join('|'),confidence})} else {unmatchedLeads.push(lead)}
+        if(sale){matches.push({lead,sale,matchedOn:matchedOn.join('|'),confidence})}
       });
-      const used=new Set(matches.map(m=>m.sale));
-      const unmatchedSales=sales.filter(s=>!used.has(s));
-      return {matches,unmatchedLeads,unmatchedSales}
+      return matches; // filtering happens in compute()
     }
 
     function makeSaleKeyFactory(sEmail,sPhone,sName,sRevenue){return function(s){const e=normalizeEmail(s?.[sEmail]),p=normalizePhone(s?.[sPhone]),n=normalizeName(s?.[sName]),rev=(s?.[sRevenue]??'').toString().replace(/[^0-9.\-]/g,'');return JSON.stringify([e,p,n,rev])}}
@@ -238,13 +236,10 @@ YouTube: yt, youtube</textarea>
       return Array.from(map.values()).sort((a,b)=>b.revenue-a.revenue)
     }
 
-    // ===== Alias map =====
     function aliasMap(){const txt=$('#aliasText').value;const map=new Map();txt.split(/\n+/).forEach(line=>{const parts=line.split(':');if(parts.length<2) return;const canonical=parts[0].trim();const aliases=parts[1].split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);if(canonical) map.set(canonical.toLowerCase(),canonical);aliases.forEach(a=>map.set(a,canonical))});return map}
 
-    // ===== CSV download =====
     function downloadCSV(filename,rows){if(!rows||!rows.length) return;const headers=Object.keys(rows[0]);const csv=[headers.join(',')].concat(rows.map(r=>headers.map(h=>{const v=r[h]??'';const s=v.toString().replace(/"/g,'""');return /[",\n]/.test(s)?'"'+s+'"':s}).join(','))).join('\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url)}
 
-    // ===== UI wiring =====
     let current={matches:[],unmatchedLeads:[],unmatchedSales:[],platformSummary:[],totalRevenue:0};
 
     function updateMeta(){
@@ -266,16 +261,30 @@ YouTube: yt, youtube</textarea>
         return;
       }
       const enableFuzzy=$('#enableFuzzy').checked; const nameThreshold=parseFloat($('#nameThreshold').value);
-      const {matches,unmatchedLeads,unmatchedSales}=matchRecords({
+
+      // Build matches
+      const rawMatches=matchRecords({
         sales:state.sales.rows,leads:state.leads.rows,
-        mapSales:{email:sEmail,phone:sPhone,name:sName,revenue:sRevenue},
+        mapSales:{email:sEmail,phone:sPhone,name:sName},
         mapLeads:{email:lEmail,phone:lPhone,name:lName},
         options:{enableFuzzy,nameThreshold}
       });
+
+      // Strict rule: if fuzzy OFF, only keep confidence === 1
+      const matches = enableFuzzy ? rawMatches : rawMatches.filter(m => m.confidence === 1);
+
+      // Compute unmatched sets based on final matches
+      const usedSales=new Set(matches.map(m=>m.sale));
+      const usedLeads=new Set(matches.map(m=>m.lead));
+      const unmatchedLeads=state.leads.rows.filter(l=>!usedLeads.has(l));
+      const unmatchedSales=state.sales.rows.filter(s=>!usedSales.has(s));
+
       const saleKey=makeSaleKeyFactory(sEmail,sPhone,sName,sRevenue);
       const summary=groupByPlatformSummaryDedup(matches,lPlatform,sRevenue,saleKey,normalizePlatformRaw);
+
       // total revenue de-duped
       const seen=new Set(); let total=0; matches.forEach(m=>{const k=saleKey(m.sale); if(!seen.has(k)){const rev=parseFloat((m.sale?.[sRevenue]??'').toString().replace(/[^0-9.\-]/g,''))||0; total+=rev; seen.add(k)}});
+
       current={matches,unmatchedLeads,unmatchedSales,platformSummary:summary,totalRevenue:total};
       renderResults(current);
     }
@@ -284,24 +293,15 @@ YouTube: yt, youtube</textarea>
       $('#matchesCount').textContent = (matches||[]).length.toLocaleString();
       $('#platformsCount').textContent = (platformSummary||[]).length.toLocaleString();
       $('#totalRevenue').textContent = money(totalRevenue||0);
-      // Buttons
       $('#btnDownloadMatches').disabled = !(matches&&matches.length);
       $('#btnDownloadSummary').disabled = !(platformSummary&&platformSummary.length);
       $('#btnDownloadUnmatched').disabled = !(state.sales.rows.length&&state.leads.rows.length);
-      // Summary table
       const tb=$('#tblSummary tbody');
       tb.innerHTML='';
       if(!platformSummary||!platformSummary.length){tb.innerHTML='<tr><td colspan="3" class="hint">No data yet. Upload files and map columns.</td></tr>';}
-      else{
-        platformSummary.forEach(r=>{
-          const tr=document.createElement('tr');
-          tr.innerHTML=`<td>${r.platform}</td><td>${r.leads.toLocaleString()}</td><td>${money(r.revenue)}</td>`;
-          tb.appendChild(tr);
-        })
-      }
-      // Matches preview
+      else{platformSummary.forEach(r=>{const tr=document.createElement('tr');tr.innerHTML=`<td>${r.platform}</td><td>${r.leads.toLocaleString()}</td><td>${money(r.revenue)}</td>`;tb.appendChild(tr)})}
       const mp=$('#tblMatches tbody'); mp.innerHTML='';
-      if(!matches||!matches.length){mp.innerHTML='<tr><td colspan="10" class="hint">No matches yet.</td></tr>';}
+      if(!matches||!matches.length){mp.innerHTML='<tr><td colspan="10" class="hint">No matches yet.</td></tr>'}
       else{
         const lEmail=$('#lEmail').value, lPhone=$('#lPhone').value, lName=$('#lName').value, lPlatform=$('#lPlatform').value;
         const sEmail=$('#sEmail').value, sPhone=$('#sPhone').value, sName=$('#sName').value, sRevenue=$('#sRevenue').value;
@@ -322,7 +322,6 @@ YouTube: yt, youtube</textarea>
       }
     }
 
-    // ===== Downloads =====
     $('#btnDownloadMatches').addEventListener('click',()=>{
       const lEmail=$('#lEmail').value, lPhone=$('#lPhone').value, lName=$('#lName').value, lPlatform=$('#lPlatform').value;
       const sEmail=$('#sEmail').value, sPhone=$('#sPhone').value, sName=$('#sName').value, sRevenue=$('#sRevenue').value;
@@ -355,18 +354,12 @@ YouTube: yt, youtube</textarea>
       downloadCSV('unmatched_sales.csv',saleRows)
     })
 
-    // ===== Inputs & events =====
-    $('#salesFile').addEventListener('change',async(e)=>{
-      const f=e.target.files?.[0]; if(!f) return; state.sales.file=f; state.sales.rows=await readCSV(f); state.sales.headers=Object.keys(state.sales.rows[0]||{}); updateMeta(); headersChanged(); compute();
-    })
-    $('#leadsFile').addEventListener('change',async(e)=>{
-      const f=e.target.files?.[0]; if(!f) return; state.leads.file=f; state.leads.rows=await readCSV(f); state.leads.headers=Object.keys(state.leads.rows[0]||{}); updateMeta(); headersChanged(); compute();
-    })
+    $('#salesFile').addEventListener('change',async(e)=>{const f=e.target.files?.[0]; if(!f) return; state.sales.file=f; state.sales.rows=await readCSV(f); state.sales.headers=Object.keys(state.sales.rows[0]||{}); updateMeta(); headersChanged(); compute();})
+    $('#leadsFile').addEventListener('change',async(e)=>{const f=e.target.files?.[0]; if(!f) return; state.leads.file=f; state.leads.rows=await readCSV(f); state.leads.headers=Object.keys(state.leads.rows[0]||{}); updateMeta(); headersChanged(); compute();})
 
     ;['sEmail','sPhone','sName','sRevenue','lEmail','lPhone','lName','lPlatform','enableFuzzy','nameThreshold','aliasText'].forEach(id=>{
       document.getElementById(id).addEventListener(id==='nameThreshold'?'input':'change',()=>{ if(id==='nameThreshold'){ document.getElementById('thVal').textContent = parseFloat(document.getElementById('nameThreshold').value).toFixed(2);} compute(); })
     })
-
   </script>
 </body>
 </html>
