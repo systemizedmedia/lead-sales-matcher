@@ -3,545 +3,474 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Lead ⇄ Sales Matcher</title>
+  <title>Lead ⇄ Sales Matcher (Email OR Phone)</title>
   <!-- Tailwind (CDN) -->
-  <script src="https://cdn.tailwindcss.com" crossorigin="anonymous"></script>
-  <!-- React 18 + ReactDOM (UMD) -->
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin="anonymous"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
-  <style>
-    body { font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial; }
-  </style>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React 18 + ReactDOM (CDN) -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel for JSX in this one-file build -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body class="min-h-screen bg-gray-50 text-gray-900">
   <div id="root"></div>
 
-  <!-- Tiny error banner so failures aren’t invisible -->
-  <script>
-    window.addEventListener('error', function(e){
-      var pre=document.createElement('pre');
-      pre.style.cssText='background:#fee;border:1px solid #fca;padding:8px;white-space:pre-wrap;margin:8px;max-width:1200px;';
-      pre.textContent='JS error: '+e.message+'\\nCheck the Console for details.';
-      document.body.prepend(pre);
-    });
-    window.addEventListener('unhandledrejection', function(e){
-      var pre=document.createElement('pre');
-      pre.style.cssText='background:#eef;border:1px solid #aaf;padding:8px;white-space:pre-wrap;margin:8px;max-width:1200px;';
-      var r=e.reason; pre.textContent='Unhandled promise rejection: '+(r && (r.stack||r.message||r));
-      document.body.prepend(pre);
-    });
-  </script>
+  <script type="text/babel">
+    const { useMemo, useState } = React;
 
-  <!-- App (no JSX) -->
-  <script>
-  (function(){
-    var React = window.React;
-    var ReactDOM = window.ReactDOM;
-    var h = React.createElement;
-    var useState = React.useState, useMemo = React.useMemo, useEffect = React.useEffect;
-
-    // ===== CSV =====
-    function parseCSV(text){
-      var rows=[], i=0, field='', row=[], inQuotes=false;
-      while(i<text.length){
-        var c=text[i];
-        if(c === '"'){ if(inQuotes && text[i+1] === '"'){ field+='"'; i+=2; continue; } inQuotes=!inQuotes; i++; continue; }
-        if(!inQuotes && c === ','){ row.push(field); field=''; i++; continue; }
-        if(!inQuotes && c === '\n'){ row.push(field); rows.push(row); field=''; row=[]; i++; continue; }
-        if(!inQuotes && c === '\r'){ i++; continue; }
+    // ===== CSV Parsing =====
+    function parseCSV(text) {
+      const rows = [];
+      let i = 0, field = '', row = [], inQuotes = false;
+      while (i < text.length) {
+        const c = text[i];
+        if (c === '"') {
+          if (inQuotes && text[i + 1] === '"') { field += '"'; i += 2; continue; }
+          inQuotes = !inQuotes; i++; continue;
+        }
+        if (!inQuotes && c === ',') { row.push(field); field = ''; i++; continue; }
+        if (!inQuotes && c === '\n') { row.push(field); rows.push(row); field = ''; row = []; i++; continue; }
+        if (!inQuotes && c === '\r') { i++; continue; }
         field += c; i++;
       }
       row.push(field); rows.push(row);
       return rows;
     }
-    function toObjects(rows){
-      if(!rows || rows.length===0) return [];
-      var headers=rows[0].map(function(h){ return (h||'').trim(); });
-      return rows.slice(1).filter(function(r){
-        return r && r.some(function(x){ return (x==null?'':String(x)).trim()!==''; });
-      }).map(function(r){
-        var o={}; for(var i=0;i<headers.length;i++){ o[headers[i]] = r[i]==null?'':r[i]; } return o;
-      });
+
+    function toObjects(rows) {
+      if (!rows || rows.length === 0) return [];
+      const headers = rows[0].map(h => h.trim());
+      return rows.slice(1)
+        .filter(r => r.some(x => (x ?? '').toString().trim() !== ''))
+        .map(r => {
+          const obj = {};
+          headers.forEach((h, idx) => (obj[h] = r[idx] ?? ''));
+          return obj;
+        });
     }
 
     // ===== Normalizers =====
-    function normalizeEmail(e){ return (e==null?'':String(e)).trim().toLowerCase(); }
-    function normalizePhone(p){ return (p==null?'':String(p)).replace(/\D+/g,'').replace(/^1(\d{10})$/,'$1'); }
-    function normalizeName(n){ return (n==null?'':String(n)).trim().toLowerCase().replace(/\s+/g,' '); }
-    function tokenRegex(t,flags){ if(flags==null) flags='i'; return new RegExp('(^|[^a-z])'+t+'([^a-z]|$)', flags); }
-    function toTitle(s){ return String(s).replace(/\s+/g,' ').trim().replace(/\b\w/g,function(c){return c.toUpperCase();}); }
+    const normalizeEmail = (e) => (e || '').toString().trim().toLowerCase();
+    const normalizePhone = (p) => (p || '').toString().replace(/\D+/g, '').replace(/^1(\d{10})$/, '$1');
+    const normalizeName  = (n) => (n || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
 
-    // ===== Platform+Offer (same field) =====
-    function canonicalizePlatform(raw){
-      var s=(raw==null?'':String(raw)).trim(); if(!s) return 'Unknown';
-      if(/you\s*tube/i.test(s) || tokenRegex('yt').test(s)) return 'Youtube';
-      if(/face\s*book/i.test(s) || tokenRegex('fb').test(s)) return 'Facebook';
-      if(/tik\s*tok/i.test(s) || tokenRegex('tt').test(s)) return 'Tiktok';
+    // Token boundary helper (avoids "loyalty" => YT)
+    const tokenRegex = (t) => new RegExp(`(^|[^a-z])${t}([^a-z]|$)`, 'i');
+    const toTitle = (s) => s.replace(/\s+/g,' ').trim().replace(/\b\w/g, c => c.toUpperCase());
+
+    // ===== Platform + Offer parsing from the SAME field =====
+    function canonicalizePlatform(raw) {
+      const s = (raw || '').toString().trim();
+      if (!s) return 'Unknown';
+      if (/you\s*tube/i.test(s) || tokenRegex('yt').test(s)) return 'Youtube';
+      if (/face\s*book/i.test(s) || tokenRegex('fb').test(s)) return 'Facebook';
+      if (/tik\s*tok/i.test(s) || tokenRegex('tt').test(s)) return 'Tiktok';
       return s;
     }
-    function replaceAllToken(s,t){ return s.replace(tokenRegex(t,'gi'),' '); }
-    function stripPlatformTokens(raw){
-      var s=(raw==null?'':String(raw));
-      s=s.replace(/you\s*tube/ig,' ').replace(/face\s*book/ig,' ').replace(/tik\s*tok/ig,' ');
-      s=replaceAllToken(s,'yt'); s=replaceAllToken(s,'fb'); s=replaceAllToken(s,'tt');
-      s=s.replace(/[-–—_:|/•()\[\]]/g,' ').replace(/\s+/g,' ').trim();
+
+    function stripPlatformTokens(raw) {
+      let s = (raw || '').toString();
+      s = s.replace(/you\s*tube/ig, ' ');
+      s = s.replace(/face\s*book/ig, ' ');
+      s = s.replace(/tik\s*tok/ig, ' ');
+      s = s.replace(tokenRegex('yt'), ' ');
+      s = s.replace(tokenRegex('fb'), ' ');
+      s = s.replace(tokenRegex('tt'), ' ');
+      s = s.replace(/[-–—_:|/•()\[\]]/g, ' ');
+      s = s.replace(/\s+/g, ' ').trim();
       return s;
     }
-    function deriveOfferFromPlatformField(raw){
-      var leftover=stripPlatformTokens(raw);
-      if(!leftover) return 'Unknown';
-      if(/free\s*quote/i.test(leftover) || tokenRegex('fq').test(leftover)) return 'Free Quote';
-      if(/tune\s*up/i.test(leftover)    || tokenRegex('tup').test(leftover)) return 'Tune Up';
+
+    function deriveOfferFromPlatformField(raw) {
+      const leftover = stripPlatformTokens(raw);
+      if (!leftover) return 'Unknown';
+      if (/free\s*quote/i.test(leftover) || tokenRegex('fq').test(leftover)) return 'Free Quote';
+      if (/tune\s*up/i.test(leftover)    || tokenRegex('tup').test(leftover)) return 'Tune Up';
       return toTitle(leftover);
     }
-    function platformOfferLabel(raw){
-      var p=canonicalizePlatform(raw); var o=deriveOfferFromPlatformField(raw);
-      return p+' — '+o;
+
+    function platformOfferLabel(raw) {
+      const p = canonicalizePlatform(raw);
+      const o = deriveOfferFromPlatformField(raw);
+      return `${p} — ${o}`;
     }
 
     // ===== Utils =====
-    function downloadCSV(filename, rows){
-      if(!rows || rows.length===0) return;
-      var headers=Object.keys(rows[0]);
-      var lines=[headers.join(',')];
-      for(var i=0;i<rows.length;i++){
-        var r=rows[i], cols=[];
-        for(var j=0;j<headers.length;j++){
-          var h=headers[j], v=r[h]==null?'':String(r[h]);
-          var s=v.replace(/"/g,'""'); cols.push(/[",\n]/.test(s)?('"'+s+'"'):s);
-        }
-        lines.push(cols.join(','));
-      }
-      var csv=lines.join('\n');
-      var blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
-      var url=URL.createObjectURL(blob); var a=document.createElement('a');
-      a.href=url; a.download=filename; document.body.appendChild(a); a.click();
+    function downloadCSV(filename, rows) {
+      if (!rows || rows.length === 0) return;
+      const headers = Object.keys(rows[0]);
+      const csv = [headers.join(',')]
+        .concat(rows.map(r => headers.map(h => {
+          const v = r[h] ?? '';
+          const s = v.toString().replace(/"/g, '""');
+          return /[",\n]/.test(s) ? `"${s}"` : s;
+        }).join(',')))
+        .join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename;
+      document.body.appendChild(a); a.click();
       document.body.removeChild(a); URL.revokeObjectURL(url);
     }
 
-    // ===== Matching: email OR phone; +name tag if same sale =====
-    function matchRecordsEmailOrPhoneWithNameTag(cfg){
-      var sales=cfg.sales, leads=cfg.leads, s=cfg.mapSales, l=cfg.mapLeads;
-      var emailIdx=new Map(), phoneIdx=new Map(), nameIdx=new Map();
-      var sEmail=s.email, sPhone=s.phone, sName=s.name;
+    // ===== Matching: email OR phone (name does NOT create a match) =====
+    function matchRecordsEmailOrPhone({ sales, leads, mapSales, mapLeads }) {
+      const emailIdx = new Map(), phoneIdx = new Map();
+      const sEmail = mapSales.email, sPhone = mapSales.phone;
 
-      for(var i=0;i<sales.length;i++){
-        var row=sales[i];
-        var e=normalizeEmail(row[sEmail]);
-        var p=normalizePhone(row[sPhone]);
-        var n=normalizeName(row[sName]);
-        if(e && !emailIdx.has(e)) emailIdx.set(e,row);
-        if(p && !phoneIdx.has(p)) phoneIdx.set(p,row);
-        if(n && !nameIdx.has(n))  nameIdx.set(n,row);
-      }
+      sales.forEach(s => {
+        const e = normalizeEmail(s[sEmail]);
+        const p = normalizePhone(s[sPhone]);
+        if (e && !emailIdx.has(e)) emailIdx.set(e, s);
+        if (p && !phoneIdx.has(p)) phoneIdx.set(p, s);
+      });
 
-      var lEmail=l.email, lPhone=l.phone, lName=l.name;
-      var matches=[];
-      for(var j=0;j<leads.length;j++){
-        var lead=leads[j];
-        var le=normalizeEmail(lead[lEmail]);
-        var lp=normalizePhone(lead[lPhone]);
-        var ln=normalizeName(lead[lName]);
+      const lEmail = mapLeads.email, lPhone = mapLeads.phone;
+      const matches = [];
 
-        var eSale=le? emailIdx.get(le) : null;
-        var pSale=lp? phoneIdx.get(lp) : null;
+      leads.forEach(lead => {
+        const le = normalizeEmail(lead[lEmail]);
+        const lp = normalizePhone(lead[lPhone]);
 
-        if(eSale || pSale){
-          var sale=null, tag='';
-          if(eSale && pSale && eSale===pSale){ sale=eSale; tag='email|phone'; }
-          else if(eSale){ sale=eSale; tag='email'; }
-          else { sale=pSale; tag='phone'; }
+        const eSale = le ? emailIdx.get(le) : null;
+        const pSale = lp ? phoneIdx.get(lp) : null;
 
-          var nSale=ln? nameIdx.get(ln) : null;
-          if(nSale && nSale===sale) tag+='+name';
-
-          matches.push({lead:lead, sale:sale, matchedOn:tag});
+        if (eSale && pSale && eSale === pSale) {
+          matches.push({ lead, sale: eSale, matchedOn: 'email|phone' });
+        } else if (eSale) {
+          matches.push({ lead, sale: eSale, matchedOn: 'email' });
+        } else if (pSale) {
+          matches.push({ lead, sale: pSale, matchedOn: 'phone' });
         }
-      }
+        // name-only is ignored by design
+      });
+
       return matches;
     }
 
     // ===== De-dup helpers =====
-    function makeSaleKeyFactory(sEmail,sPhone,sName,sRevenue){
-      return function(sale){
-        var e=normalizeEmail(sale && sale[sEmail]);
-        var p=normalizePhone(sale && sale[sPhone]);
-        var n=normalizeName(sale && sale[sName]);
-        var rev=((sale && sale[sRevenue])==null?'':String(sale[sRevenue])).replace(/[^0-9.\-]/g,'');
-        return JSON.stringify([e,p,n,rev]);
+    function makeSaleKeyFactory(sEmail, sPhone, sName, sRevenue) {
+      return function saleKey(saleObj) {
+        const e = normalizeEmail(saleObj?.[sEmail]);
+        const p = normalizePhone(saleObj?.[sPhone]);
+        const n = normalizeName(saleObj?.[sName]);
+        const rev = (saleObj?.[sRevenue] ?? '').toString().replace(/[^0-9.\-]/g, '');
+        return JSON.stringify([e, p, n, rev]);
       };
     }
-    function makeLeadKeyFactory(lEmail,lPhone,lName){
-      return function(lead){
-        var e=normalizeEmail(lead && lead[lEmail]);
-        var p=normalizePhone(lead && lead[lPhone]);
-        var n=normalizeName(lead && lead[lName]);
-        return JSON.stringify([e,p,n]);
+
+    function makeLeadKeyFactory(lEmail, lPhone, lName) {
+      return function leadKey(leadObj) {
+        const e = normalizeEmail(leadObj?.[lEmail]);
+        const p = normalizePhone(leadObj?.[lPhone]);
+        const n = normalizeName(leadObj?.[lName]);
+        return JSON.stringify([e, p, n]);
       };
     }
-    function groupByFieldSummary(matches, fieldKey, revenueKey, saleKeyFn, normalizer){
-      var map=new Map(), seenSales=new Set();
-      for(var i=0;i<matches.length;i++){
-        var m=matches[i];
-        var raw=(m.lead && m.lead[fieldKey])==null?'':String(m.lead[fieldKey]);
-        var label=normalizer? (normalizer(raw)||'Unknown') : (raw||'Unknown');
-        var revenueRaw=(m.sale && m.sale[revenueKey]);
-        var revenue=parseFloat(((revenueRaw==null?'':String(revenueRaw))).replace(/[^0-9.\-]/g,'')) || 0;
-        if(!map.has(label)) map.set(label,{label:label,leads:0,revenue:0});
-        var obj=map.get(label); obj.leads+=1;
-        var k=saleKeyFn(m.sale);
-        if(!seenSales.has(k)){ obj.revenue+=revenue; seenSales.add(k); }
-      }
-      return Array.from(map.values()).sort(function(a,b){ return b.revenue - a.revenue; });
+
+    function groupByPlatformOfferSummary(matches, platformKey, revenueKey, saleKeyFn, labelFn) {
+      const map = new Map();
+      const seenSales = new Set();
+      matches.forEach(m => {
+        const raw = (m.lead?.[platformKey] ?? '').toString();
+        const label = (labelFn ? labelFn(raw) : raw) || 'Unknown';
+        const revenueRaw = m.sale?.[revenueKey];
+        const revenue = parseFloat((revenueRaw ?? '').toString().replace(/[^0-9.\-]/g, '')) || 0;
+
+        if (!map.has(label)) map.set(label, { label, leads: 0, revenue: 0 });
+        const obj = map.get(label);
+        obj.leads += 1;
+
+        const k = saleKeyFn(m.sale);
+        if (!seenSales.has(k)) { obj.revenue += revenue; seenSales.add(k); }
+      });
+      return Array.from(map.values()).sort((a,b) => b.revenue - a.revenue);
     }
 
-    // ===== UI bits =====
-    function FilePicker(props){
-      function handle(e){
-        var file = e.target.files && e.target.files[0];
-        if(!file) return;
-        file.text().then(function(text){
-          var rows=parseCSV(text);
-          var objs=toObjects(rows);
-          props.onLoad({ fileName:file.name, headers: rows[0]||[], data: objs });
-        });
-      }
-      return h('div',{className:'flex flex-col gap-2'},
-        h('label',{className:'text-sm font-medium text-gray-700'}, props.label),
-        h('input',{type:'file', accept:'.csv', onChange:handle, className:'block w-full text-sm text-gray-700'}),
-        h('p',{className:'text-xs text-gray-500'},'CSV only. Data stays in your browser.')
-      );
-    }
-    function Select(props){
-      var opts=[].concat(props.options||[]);
-      return h('div',{className:'flex flex-col gap-1 min-w-[220px]'},
-        h('label',{className:'text-xs text-gray-600'}, props.label),
-        h('select',{
-          value: props.value==null? '' : props.value,
-          onChange: function(e){ props.onChange(e.target.value); },
-          className:'rounded-xl border px-3 py-2 text-sm'
-        },
-          h('option',{value:''},'— Select —'),
-          opts.map(function(opt){ return h('option',{key:opt, value:opt}, opt); })
-        )
-      );
-    }
-    function SummaryCard(props){
-      return h('div',{className:'rounded-2xl border p-4 shadow-sm bg-white'},
-        h('div',{className:'text-sm text-gray-500'}, props.title),
-        h('div',{className:'text-2xl font-semibold'}, props.value),
-        props.sub ? h('div',{className:'text-xs text-gray-500 mt-1'}, props.sub) : null
-      );
-    }
+    function App() {
+      const [salesFile, setSalesFile] = useState(null);
+      const [leadsFile, setLeadsFile] = useState(null);
 
-    function App(){
-      var _a = useState(null), salesFile=_a[0], setSalesFile=_a[1];
-      var _b = useState(null), leadsFile=_b[0], setLeadsFile=_b[1];
-
-      var salesHeaders = useMemo(function(){ return salesFile && salesFile.headers ? salesFile.headers : []; }, [salesFile]);
-      var leadsHeaders = useMemo(function(){ return leadsFile && leadsFile.headers ? leadsFile.headers : []; }, [leadsFile]);
+      const salesHeaders = useMemo(() => salesFile?.headers || [], [salesFile]);
+      const leadsHeaders = useMemo(() => leadsFile?.headers || [], [leadsFile]);
 
       // Column mapping
-      var _sEmail = useState(""), sEmail=_sEmail[0], setSEmail=_sEmail[1];
-      var _sPhone = useState(""), sPhone=_sPhone[0], setSPhone=_sPhone[1];
-      var _sName  = useState(""), sName=_sName[0], setSName=_sName[1];
-      var _sRevenue= useState(""), sRevenue=_sRevenue[0], setSRevenue=_sRevenue[1];
+      const [sEmail, setSEmail] = useState("");
+      const [sPhone, setSPhone] = useState("");
+      const [sName, setSName] = useState("");
+      const [sRevenue, setSRevenue] = useState("");
 
-      var _lEmail = useState(""), lEmail=_lEmail[0], setLEmail=_lEmail[1];
-      var _lPhone = useState(""), lPhone=_lPhone[0], setLPhone=_lPhone[1];
-      var _lName  = useState(""), lName=_lName[0], setLName=_lName[1];
-      var _lPlatform = useState(""), lPlatform=_lPlatform[0], setLPlatform=_lPlatform[1];
+      const [lEmail, setLEmail] = useState("");
+      const [lPhone, setLPhone] = useState("");
+      const [lName, setLName] = useState("");
+      const [lPlatform, setLPlatform] = useState("");
 
-      // Reset dropdowns when files/headers change
-      useEffect(function(){
-        if(salesFile){
-          if(salesHeaders.indexOf(sEmail)===-1) setSEmail("");
-          if(salesHeaders.indexOf(sPhone)===-1) setSPhone("");
-          if(salesHeaders.indexOf(sName)===-1)  setSName("");
-          if(salesHeaders.indexOf(sRevenue)===-1) setSRevenue("");
-        } else { setSEmail(""); setSPhone(""); setSName(""); setSRevenue(""); }
-      }, [salesFile, salesHeaders.join('|')]);
+      const ready = salesFile && leadsFile && sRevenue && lPlatform &&
+        (sEmail || sPhone) && (lEmail || lPhone); // name not required for matching
 
-      useEffect(function(){
-        if(leadsFile){
-          if(leadsHeaders.indexOf(lEmail)===-1) setLEmail("");
-          if(leadsHeaders.indexOf(lPhone)===-1) setLPhone("");
-          if(leadsHeaders.indexOf(lName)===-1)  setLName("");
-          if(leadsHeaders.indexOf(lPlatform)===-1) setLPlatform("");
-        } else { setLEmail(""); setLPhone(""); setLName(""); setLPlatform(""); }
-      }, [leadsFile, leadsHeaders.join('|')]);
-
-      var ready = !!(salesFile && leadsFile && sRevenue && lPlatform && (sEmail || sPhone) && (lEmail || lPhone));
-
-      // Matches (email OR phone; +name tag)
-      var rawMatches = useMemo(function(){
-        if(!ready) return [];
-        return matchRecordsEmailOrPhoneWithNameTag({
+      // Matches (email OR phone)
+      const rawMatches = useMemo(() => {
+        if (!ready) return [];
+        return matchRecordsEmailOrPhone({
           sales: salesFile.data,
           leads: leadsFile.data,
-          mapSales: { email: sEmail, phone: sPhone, name: sName },
-          mapLeads: { email: lEmail, phone: lPhone, name: lName }
+          mapSales: { email: sEmail, phone: sPhone },
+          mapLeads: { email: lEmail, phone: lPhone },
         });
-      }, [ready, salesFile, leadsFile, sEmail, sPhone, sName, lEmail, lPhone, lName]);
+      }, [ready, salesFile, leadsFile, sEmail, sPhone, lEmail, lPhone]);
 
-      // De-dupe by lead identity (keep first)
-      var matches = useMemo(function(){
-        if(!ready) return [];
-        var seen=new Set(), out=[];
-        var leadKey=makeLeadKeyFactory(lEmail, lPhone, lName);
-        for(var i=0;i<rawMatches.length;i++){
-          var m=rawMatches[i], k=leadKey(m.lead);
-          if(!seen.has(k)){ seen.add(k); out.push(m); }
+      // Deduplicate by lead identity (keep first row so platform/offer sticks)
+      const matches = useMemo(() => {
+        if (!ready) return [];
+        const seen = new Set();
+        const leadKey = makeLeadKeyFactory(lEmail, lPhone, lName);
+        const out = [];
+        for (const m of rawMatches) {
+          const k = leadKey(m.lead);
+          if (!seen.has(k)) { seen.add(k); out.push(m); }
         }
         return out;
       }, [ready, rawMatches, lEmail, lPhone, lName]);
 
       // sale-key for revenue de-dup
-      var saleKey = useMemo(function(){ return makeSaleKeyFactory(sEmail, sPhone, sName, sRevenue); }, [sEmail, sPhone, sName, sRevenue]);
+      const saleKey = useMemo(() => makeSaleKeyFactory(sEmail, sPhone, sName, sRevenue), [sEmail, sPhone, sName, sRevenue]);
 
-      // Summaries
-      var platformOfferSummary = useMemo(function(){
-        if(!ready) return [];
-        var map=new Map(), seenSales=new Set();
-        for(var i=0;i<matches.length;i++){
-          var m=matches[i];
-          var raw=(m.lead && m.lead[lPlatform])==null?'':String(m.lead[lPlatform]);
-          var label=platformOfferLabel(raw)||'Unknown';
-          var revenue=parseFloat(( ( (m.sale && m.sale[sRevenue])==null?'':String(m.sale[sRevenue]) ).replace(/[^0-9.\-]/g,'') ))||0;
-          if(!map.has(label)) map.set(label,{label:label, leads:0, revenue:0});
-          var obj=map.get(label); obj.leads+=1;
-          var k=saleKey(m.sale); if(!seenSales.has(k)){ obj.revenue+=revenue; seenSales.add(k); }
-        }
-        return Array.from(map.values()).sort(function(a,b){ return b.revenue - a.revenue; });
-      }, [ready, matches, lPlatform, sRevenue, saleKey]);
+      // Combined Platform (Offer) summary
+      const platformOfferSummary = useMemo(() => {
+        if (!ready) return [];
+        return groupByPlatformOfferSummary(matches, lPlatform, sRevenue, saleKey, platformOfferLabel);
+      }, [matches, ready, lPlatform, sRevenue, saleKey]);
 
-      var platformOnlySummary = useMemo(function(){
-        if(!ready) return [];
-        var all=groupByFieldSummary(matches, lPlatform, sRevenue, saleKey, canonicalizePlatform);
-        return all.filter(function(x){ return ['Youtube','Facebook','Tiktok'].indexOf(x.label)!==-1; });
-      }, [ready, matches, lPlatform, sRevenue, saleKey]);
-
-      var totalRevenue = useMemo(function(){
-        var seen=new Set(), sum=0;
-        for(var i=0;i<matches.length;i++){
-          var m=matches[i], k=saleKey(m.sale);
-          if(!seen.has(k)){
-            var revenue=parseFloat(( ( (m.sale && m.sale[sRevenue])==null?'':String(m.sale[sRevenue]) ).replace(/[^0-9.\-]/g,'') ))||0;
-            sum+=revenue; seen.add(k);
+      // De-duped overall total revenue (unique sales)
+      const totalRevenue = useMemo(() => {
+        const seen = new Set();
+        let sum = 0;
+        matches.forEach(m => {
+          const k = saleKey(m.sale);
+          if (!seen.has(k)) {
+            const revenue = parseFloat((m.sale?.[sRevenue] ?? '').toString().replace(/[^0-9.\-]/g, '')) || 0;
+            sum += revenue;
+            seen.add(k);
           }
-        }
+        });
         return sum;
       }, [matches, sRevenue, saleKey]);
 
-      function downloadMatches(){
-        var rows=matches.map(function(m){
-          return {
-            matched_on: m.matchedOn,
-            platform_offer: platformOfferLabel( ((m.lead&&m.lead[lPlatform])==null?'':String(m.lead[lPlatform])) ),
-            revenue: (m.sale && m.sale[sRevenue])==null?'':String(m.sale[sRevenue]),
-            lead_email: (m.lead && m.lead[lEmail])==null?'':String(m.lead[lEmail]),
-            sale_email: (m.sale && m.sale[sEmail])==null?'':String(m.sale[sEmail]),
-            lead_phone: (m.lead && m.lead[lPhone])==null?'':String(m.lead[lPhone]),
-            sale_phone: (m.sale && m.sale[sPhone])==null?'':String(m.sale[sPhone]),
-            lead_name: (m.lead && m.lead[lName])==null?'':String(m.lead[lName]),
-            sale_name: (m.sale && m.sale[sName])==null?'':String(m.sale[sName])
-          };
-        });
+      const downloadMatches = () => {
+        const rows = matches.map(m => ({
+          matched_on: m.matchedOn,
+          platform_offer: platformOfferLabel((m.lead?.[lPlatform] ?? '').toString()),
+          revenue: m.sale?.[sRevenue] ?? '',
+          lead_email: m.lead?.[lEmail] ?? '',
+          sale_email: m.sale?.[sEmail] ?? '',
+          lead_phone: m.lead?.[lPhone] ?? '',
+          sale_phone: m.sale?.[sPhone] ?? '',
+          lead_name: m.lead?.[lName] ?? '',
+          sale_name: m.sale?.[sName] ?? '',
+        }));
         downloadCSV('matched_leads.csv', rows);
-      }
-      function downloadPlatformOfferSummary(){
-        var rows=platformOfferSummary.map(function(r){ return { platform_offer: r.label, leads: r.leads, revenue: r.revenue.toFixed(2) }; });
-        downloadCSV('platform_offer_summary.csv', rows);
-      }
-      function downloadPlatformOnlySummary(){
-        var rows=platformOnlySummary.map(function(r){ return { platform: r.label, leads: r.leads, revenue: r.revenue.toFixed(2) }; });
-        downloadCSV('platform_summary.csv', rows);
-      }
+      };
 
-      // --- JSX-free UI ---
-      return h('div',{className:'max-w-6xl mx-auto p-6'},
-        // Header
-        h('header',{className:'mb-6'},
-          h('h1',{className:'text-2xl md:text-3xl font-bold'},'Lead ⇄ Sales Matcher'),
-          h('p',{className:'text-sm text-gray-600 mt-1'},[
-            'Match when ', h('strong',null,'email OR phone'), ' matches • Names mapped (+name tag) • Lead & sale de-dupe • Dual summaries'
-          ])
-        ),
-        // Upload cards
-        h('div',{className:'grid md:grid-cols-2 gap-6 mb-6'},
-          h('div',{className:'rounded-2xl border p-4 bg-white'},
-            h('h2',{className:'font-semibold mb-3'},'1) Upload Sales CSV'),
-            h(FilePicker,{label:'Sales CSV', onLoad:setSalesFile}),
-            salesFile ? h('div',{className:'mt-3 text-xs text-gray-600'},[
-              'Loaded ', h('strong',null,salesFile.fileName),' with ', (salesFile.data||[]).length.toLocaleString(),' rows.'
-            ]) : null,
-            h('div',{className:'mt-4 grid grid-cols-2 gap-3'},
-              h(Select,{label:'Sales: Email', value:sEmail, onChange:setSEmail, options:salesHeaders}),
-              h(Select,{label:'Sales: Phone', value:sPhone, onChange:setSPhone, options:salesHeaders}),
-              h(Select,{label:'Sales: Name',  value:sName,  onChange:setSName,  options:salesHeaders}),
-              h(Select,{label:'Sales: Revenue $', value:sRevenue, onChange:setSRevenue, options:salesHeaders})
-            )
-          ),
-          h('div',{className:'rounded-2xl border p-4 bg-white'},
-            h('h2',{className:'font-semibold mb-3'},'2) Upload Lead Database CSV'),
-            h(FilePicker,{label:'Leads CSV', onLoad:setLeadsFile}),
-            leadsFile ? h('div',{className:'mt-3 text-xs text-gray-600'},[
-              'Loaded ', h('strong',null,leadsFile.fileName),' with ', (leadsFile.data||[]).length.toLocaleString(),' rows.'
-            ]) : null,
-            h('div',{className:'mt-4 grid grid-cols-2 gap-3'},
-              h(Select,{label:'Leads: Email', value:lEmail, onChange:setLEmail, options:leadsHeaders}),
-              h(Select,{label:'Leads: Phone', value:lPhone, onChange:setLPhone, options:leadsHeaders}),
-              h(Select,{label:'Leads: Name',  value:lName,  onChange:setLName,  options:leadsHeaders}),
-              h(Select,{label:'Leads: Platform+Offer', value:lPlatform, onChange:setLPlatform, options:leadsHeaders})
-            )
-          )
-        ),
-        // Summary cards
-        h('div',{className:'flex flex-wrap gap-4 mb-6'},
-          h(SummaryCard,{title:'Files', value: ((salesFile?1:0)+(leadsFile?1:0))+'/2', sub:'Uploads ready'}),
-          h(SummaryCard,{title:'Matches', value: (matches||[]).length.toLocaleString(), sub:'Lead ↔︎ Sale pairs (de-duped by lead)'}),
-          h(SummaryCard,{title:'Plat+Offer Groups', value: (platformOfferSummary||[]).length.toLocaleString(), sub:'Combined label groups'}),
-          h(SummaryCard,{title:'Revenue (All)', value:'$'+(totalRevenue).toLocaleString(undefined,{maximumFractionDigits:2}), sub:'De-duped by sale'})
-        ),
-        // Buttons
-        h('div',{className:'mb-4 flex gap-3'},
-          h('button',{
-            disabled: !ready || (matches||[]).length===0,
-            onClick: downloadMatches,
-            className: 'px-4 py-2 rounded-xl text-sm font-medium shadow-sm '+( (!ready||(matches||[]).length===0)?'bg-gray-200 text-gray-500':'bg-black text-white')
-          },'Download Matched CSV'),
-          h('button',{
-            disabled: !ready || (platformOfferSummary||[]).length===0,
-            onClick: downloadPlatformOfferSummary,
-            className: 'px-4 py-2 rounded-xl text-sm font-medium shadow-sm '+( (!ready||(platformOfferSummary||[]).length===0)?'bg-gray-200 text-gray-500':'bg-black text-white')
-          },'Download Platform+Offer Summary CSV'),
-          h('button',{
-            disabled: !ready || (platformOnlySummary||[]).length===0,
-            onClick: downloadPlatformOnlySummary,
-            className: 'px-4 py-2 rounded-xl text-sm font-medium shadow-sm '+( (!ready||(platformOnlySummary||[]).length===0)?'bg-gray-200 text-gray-500':'bg-black text-white')
-          },'Download Platform Summary CSV')
-        ),
-        // Platform (Offer) summary table
-        h('div',{className:'rounded-2xl border bg-white'},
-          h('div',{className:'p-4 border-b flex items-center justify-between'},
-            h('h3',{className:'font-semibold'},'Platform (Offer) Summary'),
-            h('div',{className:'text-xs text-gray-500'},'Labels like “Facebook — Free Quote”. Offers inferred via FQ/TUP (else kept “as is”).')
-          ),
-          h('div',{className:'p-4 overflow-x-auto'},
-            h('table',{className:'min-w-full text-sm'},
-              h('thead',null,
-                h('tr',{className:'text-left text-gray-600'},
-                  h('th',{className:'px-3 py-2'},'Platform — Offer'),
-                  h('th',{className:'px-3 py-2'},'Matched Leads'),
-                  h('th',{className:'px-3 py-2'},'Revenue')
-                )
-              ),
-              h('tbody',null,
-                (platformOfferSummary||[]).map(function(r,idx){
-                  return h('tr',{key:idx,className:'border-t'},
-                    h('td',{className:'px-3 py-2'}, r.label),
-                    h('td',{className:'px-3 py-2'}, r.leads.toLocaleString()),
-                    h('td',{className:'px-3 py-2'}, '$'+r.revenue.toLocaleString(undefined,{maximumFractionDigits:2}))
-                  );
-                }).concat( (platformOfferSummary&&platformOfferSummary.length)?[]:[
-                  h('tr',{key:'empty'}, h('td',{className:'px-3 py-6 text-gray-500', colSpan:3}, 'No data yet. Upload files and map columns.'))
-                ])
-              )
-            )
-          )
-        ),
-        // Platform-only summary table
-        h('div',{className:'rounded-2xl border bg-white mt-6'},
-          h('div',{className:'p-4 border-b flex items-center justify-between'},
-            h('h3',{className:'font-semibold'},'Platform Summary (Youtube / Facebook / Tiktok)'),
-            h('div',{className:'text-xs text-gray-500'},'Only these three are listed here (others omitted).')
-          ),
-          h('div',{className:'p-4 overflow-x-auto'},
-            h('table',{className:'min-w-full text-sm'},
-              h('thead',null,
-                h('tr',{className:'text-left text-gray-600'},
-                  h('th',{className:'px-3 py-2'},'Platform'),
-                  h('th',{className:'px-3 py-2'},'Matched Leads'),
-                  h('th',{className:'px-3 py-2'},'Revenue')
-                )
-              ),
-              h('tbody',null,
-                (platformOnlySummary||[]).map(function(r,idx){
-                  return h('tr',{key:idx,className:'border-t'},
-                    h('td',{className:'px-3 py-2'}, r.label),
-                    h('td',{className:'px-3 py-2'}, r.leads.toLocaleString()),
-                    h('td',{className:'px-3 py-2'}, '$'+r.revenue.toLocaleString(undefined,{maximumFractionDigits:2}))
-                  );
-                }).concat( (platformOnlySummary&&platformOnlySummary.length)?[]:[
-                  h('tr',{key:'empty'}, h('td',{className:'px-3 py-6 text-gray-500', colSpan:3}, 'No data yet. Upload files and map columns.'))
-                ])
-              )
-            )
-          )
-        ),
-        // Matched preview
-        h('div',{className:'rounded-2xl border bg-white mt-6'},
-          h('div',{className:'p-4 border-b flex items-center justify-between'},
-            h('h3',{className:'font-semibold'},'Matched Rows (Preview)'),
-            h('div',{className:'text-xs text-gray-500'}, 'First 200 (de-duped by lead; platform/offer from first occurrence). ',
-              h('em',null,'Matched On'),' shows +name when name also matches the same sale.'
-            )
-          ),
-          h('div',{className:'p-4 overflow-x-auto'},
-            h('table',{className:'min-w-full text-sm'},
-              h('thead',null,
-                h('tr',{className:'text-left text-gray-600'},
-                  h('th',{className:'px-3 py-2'},'Matched On'),
-                  h('th',{className:'px-3 py-2'},'Platform — Offer'),
-                  h('th',{className:'px-3 py-2'},'Revenue'),
-                  h('th',{className:'px-3 py-2'},'Lead Email'),
-                  h('th',{className:'px-3 py-2'},'Sale Email'),
-                  h('th',{className:'px-3 py-2'},'Lead Phone'),
-                  h('th',{className:'px-3 py-2'},'Sale Phone'),
-                  h('th',{className:'px-3 py-2'},'Lead Name'),
-                  h('th',{className:'px-3 py-2'},'Sale Name')
-                )
-              ),
-              h('tbody',null,
-                (matches||[]).slice(0,200).map(function(m,idx){
-                  var plat = platformOfferLabel( ((m.lead&&m.lead[lPlatform])==null?'':String(m.lead[lPlatform])) );
-                  return h('tr',{key:idx,className:'border-t'},
-                    h('td',{className:'px-3 py-2'}, m.matchedOn),
-                    h('td',{className:'px-3 py-2'}, plat),
-                    h('td',{className:'px-3 py-2'}, (m.sale && m.sale[sRevenue])==null?'':String(m.sale[sRevenue])),
-                    h('td',{className:'px-3 py-2'}, (m.lead && m.lead[lEmail])==null?'':String(m.lead[lEmail])),
-                    h('td',{className:'px-3 py-2'}, (m.sale && m.sale[sEmail])==null?'':String(m.sale[sEmail])),
-                    h('td',{className:'px-3 py-2'}, (m.lead && m.lead[lPhone])==null?'':String(m.lead[lPhone])),
-                    h('td',{className:'px-3 py-2'}, (m.sale && m.sale[sPhone])==null?'':String(m.sale[sPhone])),
-                    h('td',{className:'px-3 py-2'}, (m.lead && m.lead[lName])==null?'':String(m.lead[lName])),
-                    h('td',{className:'px-3 py-2'}, (m.sale && m.sale[sName])==null?'':String(m.sale[sName]))
-                  );
-                }).concat( (matches&&matches.length)?[]:[
-                  h('tr',{key:'empty'}, h('td',{className:'px-3 py-6 text-gray-500', colSpan:9}, 'No matches yet.'))
-                ])
-              )
-            )
-          )
-        ),
-        // Footer
-        h('footer',{className:'text-xs text-gray-500 mt-8'},
-          h('p',null, ['Rules: A lead matches a sale if ', h('strong',null,'email OR phone'),' matches. Name does not create a match, but if it also matches the same sale, we tag it as ', h('em',null,'+name'),'.']),
-          h('p',{className:'mt-2'},'Privacy: Everything runs in your browser. No uploads.')
-        )
+      const downloadPlatformOfferSummary = () => {
+        const rows = platformOfferSummary.map(r => ({
+          platform_offer: r.label,
+          leads: r.leads,
+          revenue: r.revenue.toFixed(2)
+        }));
+        downloadCSV('platform_offer_summary.csv', rows);
+      };
+
+      return (
+        <div className="max-w-6xl mx-auto p-6">
+          <header className="mb-6">
+            <h1 className="text-2xl md:text-3xl font-bold">Lead ⇄ Sales Matcher</h1>
+            <p className="text-sm text-gray-600 mt-1">
+              Match when <strong>email OR phone</strong> matches • De-duped by lead & sale • Platform names include Offer
+            </p>
+          </header>
+
+          <div className="grid md:grid-cols-2 gap-6 mb-6">
+            <div className="rounded-2xl border p-4 bg-white">
+              <h2 className="font-semibold mb-3">1) Upload Sales CSV</h2>
+              <FilePicker label="Sales CSV" onLoad={setSalesFile} />
+              {salesFile && (
+                <div className="mt-3 text-xs text-gray-600">
+                  Loaded <strong>{salesFile.fileName}</strong> with {salesFile.data.length.toLocaleString()} rows.
+                </div>
+              )}
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <Select label="Sales: Email"     value={sEmail}    onChange={setSEmail}  options={salesHeaders} />
+                <Select label="Sales: Phone"     value={sPhone}    onChange={setSPhone}  options={salesHeaders} />
+                <Select label="Sales: Name (optional)" value={sName} onChange={setSName} options={['', ...salesHeaders]} />
+                <Select label="Sales: Revenue $" value={sRevenue}  onChange={setSRevenue} options={salesHeaders} />
+              </div>
+            </div>
+
+            <div className="rounded-2xl border p-4 bg-white">
+              <h2 className="font-semibold mb-3">2) Upload Lead Database CSV</h2>
+              <FilePicker label="Leads CSV" onLoad={setLeadsFile} />
+              {leadsFile && (
+                <div className="mt-3 text-xs text-gray-600">
+                  Loaded <strong>{leadsFile.fileName}</strong> with {leadsFile.data.length.toLocaleString()} rows.
+                </div>
+              )}
+              <div className="mt-4 grid grid-cols-2 gap-3">
+                <Select label="Leads: Email"     value={lEmail}     onChange={setLEmail}    options={leadsHeaders} />
+                <Select label="Leads: Phone"     value={lPhone}     onChange={setLPhone}    options={leadsHeaders} />
+                <Select label="Leads: Name (optional)" value={lName} onChange={setLName}   options={['', ...leadsHeaders]} />
+                <Select label="Leads: Platform+Offer" value={lPlatform} onChange={setLPlatform} options={leadsHeaders} />
+              </div>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-4 mb-6">
+            <SummaryCard title="Files" value={(salesFile ? 1 : 0) + (leadsFile ? 1 : 0) + "/2"} sub="Uploads ready" />
+            <SummaryCard title="Matches" value={matches.length.toLocaleString()} sub="Lead ↔︎ Sale pairs (de-duped by lead)" />
+            <SummaryCard title="Groups" value={platformOfferSummary.length.toLocaleString()} sub="Platform — Offer" />
+            <SummaryCard title="Revenue (All)" value={`$${totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} sub="De-duped by sale" />
+          </div>
+
+          <div className="mb-4 flex gap-3">
+            <button
+              disabled={!ready || matches.length === 0}
+              onClick={downloadMatches}
+              className={`px-4 py-2 rounded-xl text-sm font-medium shadow-sm ${(!ready || matches.length===0) ? 'bg-gray-200 text-gray-500' : 'bg-black text-white'}`}
+            >
+              Download Matched CSV
+            </button>
+            <button
+              disabled={!ready || platformOfferSummary.length === 0}
+              onClick={downloadPlatformOfferSummary}
+              className={`px-4 py-2 rounded-xl text-sm font-medium shadow-sm ${(!ready || platformOfferSummary.length===0) ? 'bg-gray-200 text-gray-500' : 'bg-black text-white'}`}
+            >
+              Download Platform+Offer Summary CSV
+            </button>
+          </div>
+
+          <div className="rounded-2xl border bg-white">
+            <div className="p-4 border-b flex items-center justify-between">
+              <h3 className="font-semibold">Platform (Offer) Summary</h3>
+              <div className="text-xs text-gray-500">Platforms: Youtube, Facebook, Tiktok • Offers: Free Quote, Tune Up (fallback: “as is”)</div>
+            </div>
+            <div className="p-4 overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-600">
+                    <th className="px-3 py-2">Platform — Offer</th>
+                    <th className="px-3 py-2">Matched Leads</th>
+                    <th className="px-3 py-2">Revenue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {platformOfferSummary.map((r, idx) => (
+                    <tr key={idx} className="border-t">
+                      <td className="px-3 py-2">{r.label}</td>
+                      <td className="px-3 py-2">{r.leads.toLocaleString()}</td>
+                      <td className="px-3 py-2">${r.revenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                    </tr>
+                  ))}
+                  {platformOfferSummary.length === 0 && (
+                    <tr><td className="px-3 py-6 text-gray-500" colSpan={3}>No data yet. Upload files and map columns.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-white mt-6">
+            <div className="p-4 border-b flex items-center justify-between">
+              <h3 className="font-semibold">Matched Rows (Preview)</h3>
+              <div className="text-xs text-gray-500">First 200 (de-duped by lead; platform/offer from first occurrence)</div>
+            </div>
+            <div className="p-4 overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-600">
+                    <th className="px-3 py-2">Matched On</th>
+                    <th className="px-3 py-2">Platform — Offer</th>
+                    <th className="px-3 py-2">Revenue</th>
+                    <th className="px-3 py-2">Lead Email</th>
+                    <th className="px-3 py-2">Sale Email</th>
+                    <th className="px-3 py-2">Lead Phone</th>
+                    <th className="px-3 py-2">Sale Phone</th>
+                    <th className="px-3 py-2">Lead Name</th>
+                    <th className="px-3 py-2">Sale Name</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matches.slice(0,200).map((m, idx) => (
+                    <tr key={idx} className="border-t">
+                      <td className="px-3 py-2">{m.matchedOn}</td>
+                      <td className="px-3 py-2">{platformOfferLabel((m.lead?.[lPlatform] ?? '').toString())}</td>
+                      <td className="px-3 py-2">{(m.sale?.[sRevenue] ?? '').toString()}</td>
+                      <td className="px-3 py-2">{(m.lead?.[lEmail] ?? '').toString()}</td>
+                      <td className="px-3 py-2">{(m.sale?.[sEmail] ?? '').toString()}</td>
+                      <td className="px-3 py-2">{(m.lead?.[lPhone] ?? '').toString()}</td>
+                      <td className="px-3 py-2">{(m.sale?.[sPhone] ?? '').toString()}</td>
+                      <td className="px-3 py-2">{(m.lead?.[lName] ?? '').toString()}</td>
+                      <td className="px-3 py-2">{(m.sale?.[sName] ?? '').toString()}</td>
+                    </tr>
+                  ))}
+                  {matches.length === 0 && (
+                    <tr><td className="px-3 py-6 text-gray-500" colSpan={9}>No matches yet.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <footer className="text-xs text-gray-500 mt-8">
+            <p>Rules: A lead matches a sale if <strong>email OR phone</strong> matches. Name is ignored for matching.</p>
+            <p className="mt-2">Privacy: Everything runs in your browser. No uploads.</p>
+          </footer>
+        </div>
       );
     }
 
-    ReactDOM.createRoot(document.getElementById('root')).render( h(App) );
-  })();
-  </script>
-
-  <!-- OPTIONAL: one-time SW/cache killer. Visit with ?kill-sw=1 to clear old SW/caches -->
-  <script>
-    if (location.search.includes('kill-sw') && 'serviceWorker' in navigator) {
-      navigator.serviceWorker.getRegistrations().then(function(rs){ rs.forEach(function(r){ r.unregister(); }); })
-        .then(function(){ return caches.keys().then(function(keys){ return Promise.all(keys.map(function(k){ return caches.delete(k); })); }); })
-        .then(function(){ location.replace(location.origin + location.pathname); });
+    // ===== Reusable UI components =====
+    function FilePicker({ label, onLoad }) {
+      const handle = async (e) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const text = await file.text();
+        const rows = parseCSV(text);
+        const objs = toObjects(rows);
+        onLoad({ fileName: file.name, headers: rows[0], data: objs });
+      };
+      return (
+        <div className="flex flex-col gap-2">
+          <label className="text-sm font-medium text-gray-700">{label}</label>
+          <input type="file" accept=".csv" onChange={handle} className="block w-full text-sm text-gray-700" />
+          <p className="text-xs text-gray-500">CSV only. Data stays in your browser.</p>
+        </div>
+      );
     }
+
+    function Select({ label, value, onChange, options }) {
+      return (
+        <div className="flex flex-col gap-1 min-w-[200px]">
+          <label className="text-xs text-gray-600">{label}</label>
+          <select value={value} onChange={(e) => onChange(e.target.value)} className="rounded-xl border px-3 py-2 text-sm">
+            {options.map(opt =>
+              <option key={opt} value={opt}>{opt === '' ? '— Select —' : opt}</option>
+            )}
+          </select>
+        </div>
+      );
+    }
+
+    function SummaryCard({ title, value, sub }) {
+      return (
+        <div className="rounded-2xl border p-4 shadow-sm bg-white">
+          <div className="text-sm text-gray-500">{title}</div>
+          <div className="text-2xl font-semibold">{value}</div>
+          {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
 </body>
 </html>
