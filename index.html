@@ -3,561 +3,359 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Lead ⇄ Sales Matcher (Upgraded)</title>
-  <!-- Tailwind (CDN) -->
-  <script src="https://cdn.tailwindcss.com"></script>
+  <title>Lead ⇄ Sales Matcher — Offline</title>
+  <style>
+    :root{--bg:#f7f7f8;--card:#fff;--fg:#0f172a;--muted:#64748b;--border:#e5e7eb;--accent:#111827}
+    *{box-sizing:border-box}
+    body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+    .wrap{max-width:1120px;margin:32px auto;padding:0 16px}
+    h1{font-size:24px;margin:0 0 6px}
+    .sub{color:var(--muted);font-size:12px;margin-bottom:18px}
+    .grid{display:grid;gap:16px}
+    @media(min-width:900px){.grid-2{grid-template-columns:1fr 1fr}}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px}
+    .card .hd{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+    .card .bd{padding:16px}
+    label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}
+    input[type=file],select,textarea,input[type=text]{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:#fff}
+    textarea{min-height:110px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+    .row{display:grid;gap:12px}
+    @media(min-width:700px){.row-2{grid-template-columns:1fr 1fr}}
+    @media(min-width:880px){.row-4{grid-template-columns:repeat(4,1fr)}}
+    .btn{padding:10px 14px;border-radius:12px;border:1px solid var(--border);background:#fff;color:#111;cursor:pointer}
+    .btn[disabled]{opacity:.5;cursor:not-allowed}
+    .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+    .kv{display:grid;grid-template-columns:auto 1fr;gap:4px 12px}
+    .kv div:nth-child(odd){color:var(--muted)}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:10px 12px;text-align:left;border-top:1px solid var(--border);vertical-align:top}
+    th{color:var(--muted);font-weight:600}
+    .pill{display:inline-block;background:#eef2ff;color:#3730a3;padding:2px 8px;border-radius:999px;font-size:12px}
+    .summary{display:flex;flex-wrap:wrap;gap:12px;margin:18px 0}
+    .chip{background:#fff;border:1px solid var(--border);border-radius:14px;padding:10px 14px}
+    .num{font-weight:700}
+    .hint{color:var(--muted);font-size:12px}
+    .footer{color:var(--muted);font-size:12px;margin-top:22px}
+  </style>
 </head>
-<body class="min-h-screen bg-gray-50 text-gray-900">
-  <div id="root"></div>
+<body>
+  <div class="wrap">
+    <h1>Lead ⇄ Sales Matcher <span class="pill">Offline</span></h1>
+    <div class="sub">Smarter matching, de-duped revenue, exports — all client-side, no CDNs.</div>
 
-  <!-- React 18 + ReactDOM (CDN) -->
-  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <!-- Babel so we can write JSX in this single file -->
-  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <div class="grid grid-2">
+      <div class="card">
+        <div class="hd"><strong>1) Upload Sales CSV</strong></div>
+        <div class="bd">
+          <div class="row row-2">
+            <div>
+              <label>Sales CSV</label>
+              <input id="salesFile" type="file" accept=".csv" />
+              <div class="hint" id="salesMeta"></div>
+            </div>
+          </div>
+          <div class="row row-2" style="margin-top:12px">
+            <div><label>Sales: Email</label><select id="sEmail"></select></div>
+            <div><label>Sales: Phone</label><select id="sPhone"></select></div>
+            <div><label>Sales: Name</label><select id="sName"></select></div>
+            <div><label>Sales: Revenue $</label><select id="sRevenue"></select></div>
+          </div>
+        </div>
+      </div>
 
-  <script type="text/babel">
-    const { useMemo, useState } = React;
+      <div class="card">
+        <div class="hd"><strong>2) Upload Lead Database CSV</strong></div>
+        <div class="bd">
+          <div class="row row-2">
+            <div>
+              <label>Leads CSV</label>
+              <input id="leadsFile" type="file" accept=".csv" />
+              <div class="hint" id="leadsMeta"></div>
+            </div>
+          </div>
+          <div class="row row-2" style="margin-top:12px">
+            <div><label>Leads: Email</label><select id="lEmail"></select></div>
+            <div><label>Leads: Phone</label><select id="lPhone"></select></div>
+            <div><label>Leads: Name</label><select id="lName"></select></div>
+            <div><label>Leads: Platform</label><select id="lPlatform"></select></div>
+          </div>
+        </div>
+      </div>
+    </div>
 
-    // ===== CSV Parsing =====
-    function parseCSV(text) {
-      const rows = [];
-      let i = 0, field = '', row = [], inQuotes = false;
-      while (i < text.length) {
-        const c = text[i];
-        if (c === '"') {
-          if (inQuotes && text[i + 1] === '"') { field += '"'; i += 2; continue; }
-          inQuotes = !inQuotes; i++; continue;
-        }
-        if (!inQuotes && c === ',') { row.push(field); field = ''; i++; continue; }
-        if (!inQuotes && c === '\n') { row.push(field); rows.push(row); field = ''; row = []; i++; continue; }
-        if (!inQuotes && c === '\r') { i++; continue; }
-        field += c; i++;
-      }
-      row.push(field); rows.push(row);
-      return rows;
-    }
+    <div class="card" style="margin-top:16px">
+      <div class="hd"><strong>3) Matching Options</strong></div>
+      <div class="bd">
+        <div class="row row-2">
+          <div style="display:flex;align-items:center;gap:8px">
+            <input id="enableFuzzy" type="checkbox" checked>
+            <label for="enableFuzzy" style="margin:0">Enable fuzzy name matching</label>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px">
+            <label style="margin:0">Name threshold: <span id="thVal">0.90</span></label>
+            <input id="nameThreshold" type="range" min="0.80" max="0.99" step="0.01" value="0.90" style="width:100%">
+          </div>
+        </div>
+      </div>
+    </div>
 
-    function toObjects(rows) {
-      if (!rows || rows.length === 0) return [];
-      const headers = rows[0].map(h => h.trim());
-      return rows.slice(1)
-        .filter(r => r.some(x => (x ?? '').toString().trim() !== ''))
-        .map(r => {
-          const obj = {};
-          headers.forEach((h, idx) => (obj[h] = r[idx] ?? ''));
-          return obj;
-        });
-    }
+    <div class="card" style="margin-top:16px">
+      <div class="hd"><strong>4) Platform Aliases (optional)</strong></div>
+      <div class="bd">
+        <div class="hint" style="margin-bottom:8px">Map abbreviations to a canonical name. One line per platform. Format: <code>Canonical: alias1, alias2</code></div>
+        <textarea id="aliasText">Facebook: fb, facebook
+TikTok: tt, tiktok
+YouTube: yt, youtube</textarea>
+      </div>
+    </div>
+
+    <div class="summary">
+      <div class="chip">Files: <span class="num" id="filesCount">0/2</span></div>
+      <div class="chip">Matches: <span class="num" id="matchesCount">0</span></div>
+      <div class="chip">Platforms: <span class="num" id="platformsCount">0</span></div>
+      <div class="chip">Revenue (All): <span class="num" id="totalRevenue">$0.00</span></div>
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+      <button class="btn primary" id="btnDownloadMatches" disabled>Download Matched CSV</button>
+      <button class="btn primary" id="btnDownloadSummary" disabled>Download Platform Summary CSV</button>
+      <button class="btn" id="btnDownloadUnmatched" disabled>Download Unmatched (Leads & Sales)</button>
+    </div>
+
+    <div class="card">
+      <div class="hd"><strong>Platform Summary</strong><span class="hint">&nbsp;&nbsp;De-duped revenue by sale</span></div>
+      <div class="bd">
+        <div style="overflow:auto">
+          <table id="tblSummary">
+            <thead><tr><th>Platform</th><th>Matched Leads</th><th>Revenue</th></tr></thead>
+            <tbody><tr><td colspan="3" class="hint">No data yet. Upload files and map columns.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px">
+      <div class="hd"><strong>Matched Rows (Preview)</strong><span class="hint">&nbsp;&nbsp;Shows up to 200 matches</span></div>
+      <div class="bd">
+        <div style="overflow:auto">
+          <table id="tblMatches">
+            <thead>
+              <tr>
+                <th>Matched On</th>
+                <th>Conf.</th>
+                <th>Platform</th>
+                <th>Revenue</th>
+                <th>Lead Email</th>
+                <th>Sale Email</th>
+                <th>Lead Phone</th>
+                <th>Sale Phone</th>
+                <th>Lead Name</th>
+                <th>Sale Name</th>
+              </tr>
+            </thead>
+            <tbody><tr><td colspan="10" class="hint">No matches yet.</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <div class="footer">
+      Tips: Ensure both CSVs include at least one of Email, Phone, or Name. Revenue should be numeric (e.g., 1250 or $1,250.00). Platform comes from your Lead DB. All processing happens locally in your browser.
+    </div>
+  </div>
+
+  <script>
+    // ===== CSV Parser (handles quotes) =====
+    function parseCSV(text){
+      const rows=[];let i=0,field='',row=[],inQ=false;while(i<text.length){const c=text[i];if(c==='"'){if(inQ&&text[i+1]==='"'){field+='"';i+=2;continue}inQ=!inQ;i++;continue}if(!inQ&&c===','){row.push(field);field='';i++;continue}if(!inQ&&c==='\n'){row.push(field);rows.push(row);field='';row=[];i++;continue}if(!inQ&&c==='\r'){i++;continue}field+=c;i++}row.push(field);rows.push(row);return rows}
+    function toObjects(rows){if(!rows||!rows.length)return[];const headers=rows[0].map(h=>h.trim());return rows.slice(1).filter(r=>r.some(x=>(x??'').toString().trim()!=='')) .map(r=>{const o={};headers.forEach((h,idx)=>o[h]=r[idx]??'');return o})}
 
     // ===== Normalizers =====
-    const firstItem = (s) => (s||'').toString().split(/[;,]/)[0].trim();
-    const normalizeEmail = (e) => {
-      const raw = firstItem(e).toLowerCase();
-      if (!raw) return '';
-      const [local, domain] = raw.split('@');
-      if (!domain) return raw;
-      if (domain === 'gmail.com') {
-        return `${local.replace(/\./g, '')}@${domain}`;
-      }
-      return `${local}@${domain}`;
-    };
-    const normalizePhone = (p) => (p || '').toString().replace(/\D+/g, '').replace(/^1(\d{10})$/, '$1');
-    const normalizeName  = (n) => (n || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
+    const firstItem = (s)=> (s||'').toString().split(/[;,]/)[0].trim();
+    function normalizeEmail(e){const raw=firstItem(e).toLowerCase();if(!raw) return '';const parts=raw.split('@');if(parts.length<2) return raw;const local=parts[0],domain=parts[1];if(domain==='gmail.com'){return local.replace(/\./g,'')+'@'+domain}return local+'@'+domain}
+    function normalizePhone(p){return (p||'').toString().replace(/\D+/g,'').replace(/^1(\d{10})$/,'$1')}
+    function normalizeName(n){return (n||'').toString().trim().toLowerCase().replace(/\s+/g,' ')}
+    function normalizePlatformRaw(p, aliasMap){const raw=(p||'').toString().trim();const key=raw.toLowerCase();if(aliasMap&&aliasMap.has(key)) return aliasMap.get(key);return raw||'Unknown'}
 
-    function normalizePlatformRaw(p, aliasMap) {
-      const raw = (p || '').toString().trim();
-      const key = raw.toLowerCase();
-      if (aliasMap && aliasMap.has(key)) return aliasMap.get(key);
-      return raw || 'Unknown';
-    }
+    // ===== Similarity (Jaro/Winkler) =====
+    function jaro(a,b){if(!a||!b) return 0;if(a===b) return 1;const mw=Math.floor(Math.max(a.length,b.length)/2)-1;const aM=new Array(a.length).fill(false),bM=new Array(b.length).fill(false);let m=0;for(let i=0;i<a.length;i++){const start=Math.max(0,i-mw),end=Math.min(i+mw+1,b.length);for(let j=start;j<end;j++){if(bM[j]) continue;if(a[i]!==b[j]) continue;aM[i]=true;bM[j]=true;m++;break}} if(m===0) return 0;let t=0,k=0;for(let i=0;i<a.length;i++){if(!aM[i]) continue;while(!bM[k]) k++;if(a[i]!==b[k]) t++;k++}return (m/a.length + m/b.length + (m - t/2)/m)/3}
+    function jaroWinkler(a,b,p=0.1,maxL=4){const j=jaro(a,b);let l=0;for(;l<Math.min(maxL,a.length,b.length)&&a[l]===b[l];l++);return j + l*p*(1-j)}
 
-    // ===== Similarity (Jaro-Winkler) for fuzzy name matching =====
-    function jaro(a, b) {
-      if (!a || !b) return 0;
-      if (a === b) return 1;
-      const mtp = []; // matches, transpositions, prefix
-      const matchWindow = Math.floor(Math.max(a.length, b.length) / 2) - 1;
-      const aMatches = new Array(a.length).fill(false);
-      const bMatches = new Array(b.length).fill(false);
-      let matches = 0;
-      for (let i = 0; i < a.length; i++) {
-        const start = Math.max(0, i - matchWindow);
-        const end = Math.min(i + matchWindow + 1, b.length);
-        for (let j = start; j < end; j++) {
-          if (bMatches[j]) continue;
-          if (a[i] !== b[j]) continue;
-          aMatches[i] = true; bMatches[j] = true; matches++; break;
-        }
-      }
-      if (matches === 0) return 0;
-      let t = 0, k = 0;
-      for (let i = 0; i < a.length; i++) {
-        if (!aMatches[i]) continue;
-        while (!bMatches[k]) k++;
-        if (a[i] !== b[k]) t++;
-        k++;
-      }
-      const m = matches;
-      const jaro = (m / a.length + m / b.length + (m - t/2) / m) / 3;
-      return jaro;
-    }
-    function jaroWinkler(a, b, p = 0.1, maxL = 4) {
-      const j = jaro(a, b);
-      let l = 0;
-      for (; l < Math.min(maxL, a.length, b.length) && a[l] === b[l]; l++);
-      return j + l * p * (1 - j);
-    }
+    // ===== CSV helpers =====
+    function readCSV(file){return new Promise(res=>{const r=new FileReader();r.onload=()=>res(toObjects(parseCSV(r.result)));r.readAsText(file)})}
 
-    // ===== Utils =====
-    function downloadCSV(filename, rows) {
-      if (!rows || rows.length === 0) return;
-      const headers = Object.keys(rows[0]);
-      const csv = [headers.join(',')]
-        .concat(rows.map(r => headers.map(h => {
-          const v = r[h] ?? '';
-          const s = v.toString().replace(/"/g, '""');
-          return /[",\n]/.test(s) ? `"${s}"` : s;
-        }).join(',')))
-        .join('\n');
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url; a.download = filename;
-      document.body.appendChild(a); a.click();
-      document.body.removeChild(a); URL.revokeObjectURL(url);
-    }
+    // ===== DOM helpers =====
+    const $=sel=>document.querySelector(sel);
+    function fillSelect(sel,headers){const el=$(sel);el.innerHTML='<option value="">— Select —</option>'+(headers||[]).map(h=>`<option>${h}</option>`).join('')}
+    function money(n){return '$'+(n||0).toLocaleString(undefined,{maximumFractionDigits:2})}
 
-    // ===== Matching =====
-    function matchRecords({ sales, leads, mapSales, mapLeads, options }) {
-      const emailIdx = new Map(), phoneIdx = new Map(), nameIdx = new Map();
-      const sEmail = mapSales.email, sPhone = mapSales.phone, sName = mapSales.name, sRev = mapSales.revenue;
+    // ===== Global state =====
+    const state={sales:{file:null,rows:[],headers:[]},leads:{file:null,rows:[],headers:[]}};
 
-      // index sales
-      sales.forEach(s => {
-        const e = normalizeEmail(s[sEmail]);
-        const p = normalizePhone(s[sPhone]);
-        const n = normalizeName(s[sName]);
-        if (e) emailIdx.set(e, s);
-        if (p) phoneIdx.set(p, s);
-        if (n) nameIdx.set(n, s);
+    // ===== Index + Match =====
+    function matchRecords({sales,leads,mapSales,mapLeads,options}){
+      const emailIdx=new Map(),phoneIdx=new Map(),nameIdx=new Map();
+      const sEmail=mapSales.email,sPhone=mapSales.phone,sName=mapSales.name,sRev=mapSales.revenue;
+      sales.forEach(s=>{const e=normalizeEmail(s[sEmail]),p=normalizePhone(s[sPhone]),n=normalizeName(s[sName]);if(e) emailIdx.set(e,s);if(p) phoneIdx.set(p,s);if(n) nameIdx.set(n,s)});
+      const lEmail=mapLeads.email,lPhone=mapLeads.phone,lName=mapLeads.name;
+      const matches=[],unmatchedLeads=[];
+      leads.forEach(lead=>{
+        const le=normalizeEmail(lead[lEmail]),lp=normalizePhone(lead[lPhone]),ln=normalizeName(lead[lName]);
+        let sale=null,matchedOn=[],confidence=0;
+        if(!sale && le && emailIdx.has(le)){sale=emailIdx.get(le);matchedOn.push('email');confidence=1}
+        if(!sale && lp && phoneIdx.has(lp)){sale=phoneIdx.get(lp);matchedOn.push('phone');confidence=1}
+        if(!sale && ln && nameIdx.has(ln)){sale=nameIdx.get(ln);matchedOn.push('name');confidence=0.98}
+        if(!sale && options.enableFuzzy && ln){let best={s:null,score:0};nameIdx.forEach((sObj,nameKey)=>{const sc=jaroWinkler(ln,nameKey);if(sc>best.score) best={s:sObj,score:sc}}); if(best.score>=(options.nameThreshold||0.9)){sale=best.s;matchedOn.push('name_fuzzy');confidence=+best.score.toFixed(3)}}
+        if(sale){matches.push({lead,sale,matchedOn:matchedOn.join('|'),confidence})} else {unmatchedLeads.push(lead)}
       });
+      const used=new Set(matches.map(m=>m.sale));
+      const unmatchedSales=sales.filter(s=>!used.has(s));
+      return {matches,unmatchedLeads,unmatchedSales}
+    }
 
-      const lEmail = mapLeads.email, lPhone = mapLeads.phone, lName = mapLeads.name;
-      const matches = []; const unmatchedLeads = [];
+    function makeSaleKeyFactory(sEmail,sPhone,sName,sRevenue){return function(s){const e=normalizeEmail(s?.[sEmail]),p=normalizePhone(s?.[sPhone]),n=normalizeName(s?.[sName]),rev=(s?.[sRevenue]??'').toString().replace(/[^0-9.\-]/g,'');return JSON.stringify([e,p,n,rev])}}
 
-      leads.forEach(lead => {
-        const le = normalizeEmail(lead[lEmail]);
-        const lp = normalizePhone(lead[lPhone]);
-        const ln = normalizeName(lead[lName]);
-
-        let sale = null; let matchedOn = []; let confidence = 0;
-
-        if (!sale && le && emailIdx.has(le)) { sale = emailIdx.get(le); matchedOn.push('email'); confidence = 1; }
-        if (!sale && lp && phoneIdx.has(lp)) { sale = phoneIdx.get(lp); matchedOn.push('phone'); confidence = 1; }
-        if (!sale && ln && nameIdx.has(ln))  { sale = nameIdx.get(ln);  matchedOn.push('name');  confidence = 0.98; }
-
-        // Fuzzy name fallback
-        if (!sale && options?.enableFuzzy && ln) {
-          let best = { s: null, score: 0 };
-          // simple sweep through name index (could be optimized w/ blocking by first char)
-          nameIdx.forEach((sObj, nameKey) => {
-            const score = jaroWinkler(ln, nameKey);
-            if (score > best.score) best = { s: sObj, score };
-          });
-          if (best.score >= (options.nameThreshold ?? 0.9)) {
-            sale = best.s; matchedOn.push('name_fuzzy'); confidence = Number(best.score.toFixed(3));
-          }
-        }
-
-        if (sale) {
-          const rev = (sale?.[sRev] ?? '').toString();
-          matches.push({ lead, sale, matchedOn: matchedOn.join('|'), confidence });
-        } else {
-          unmatchedLeads.push(lead);
-        }
+    function groupByPlatformSummaryDedup(matches,platformKey,revenueKey,saleKeyFn,normalizer){
+      const map=new Map(), seen=new Set();
+      matches.forEach(m=>{
+        const platform=(normalizer?normalizer(m.lead?.[platformKey]||'',aliasMap()):m.lead?.[platformKey]||'')||'Unknown';
+        const revenue=parseFloat((m.sale?.[revenueKey]??'').toString().replace(/[^0-9.\-]/g,''))||0;
+        if(!map.has(platform)) map.set(platform,{platform,leads:0,revenue:0});
+        const obj=map.get(platform); obj.leads+=1;
+        const k=saleKeyFn(m.sale); if(!seen.has(k)){obj.revenue+=revenue;seen.add(k)}
       });
-
-      // Compute unmatched sales (those never used in any match)
-      const usedSales = new Set(matches.map(m => m.sale));
-      const unmatchedSales = sales.filter(s => !usedSales.has(s));
-
-      return { matches, unmatchedLeads, unmatchedSales };
+      return Array.from(map.values()).sort((a,b)=>b.revenue-a.revenue)
     }
 
-    // ===== De-dup helpers =====
-    function makeSaleKeyFactory(sEmail, sPhone, sName, sRevenue) {
-      return function saleKey(saleObj) {
-        const e = normalizeEmail(saleObj?.[sEmail]);
-        const p = normalizePhone(saleObj?.[sPhone]);
-        const n = normalizeName(saleObj?.[sName]);
-        const rev = (saleObj?.[sRevenue] ?? '').toString().replace(/[^0-9.\-]/g, '');
-        return JSON.stringify([e, p, n, rev]);
-      };
+    // ===== Alias map =====
+    function aliasMap(){const txt=$('#aliasText').value;const map=new Map();txt.split(/\n+/).forEach(line=>{const parts=line.split(':');if(parts.length<2) return;const canonical=parts[0].trim();const aliases=parts[1].split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);if(canonical) map.set(canonical.toLowerCase(),canonical);aliases.forEach(a=>map.set(a,canonical))});return map}
+
+    // ===== CSV download =====
+    function downloadCSV(filename,rows){if(!rows||!rows.length) return;const headers=Object.keys(rows[0]);const csv=[headers.join(',')].concat(rows.map(r=>headers.map(h=>{const v=r[h]??'';const s=v.toString().replace(/"/g,'""');return /[",\n]/.test(s)?'"'+s+'"':s}).join(','))).join('\n');const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url)}
+
+    // ===== UI wiring =====
+    let current={matches:[],unmatchedLeads:[],unmatchedSales:[],platformSummary:[],totalRevenue:0};
+
+    function updateMeta(){
+      $('#salesMeta').textContent = state.sales.rows.length?`Loaded ${state.sales.file?.name||''} with ${state.sales.rows.length.toLocaleString()} rows.`:'';
+      $('#leadsMeta').textContent = state.leads.rows.length?`Loaded ${state.leads.file?.name||''} with ${state.leads.rows.length.toLocaleString()} rows.`:'';
+      $('#filesCount').textContent = (state.sales.rows.length?1:0)+(state.leads.rows.length?1:0)+"/2";
     }
 
-    function groupByPlatformSummaryDedup(matches, platformKey, revenueKey, saleKeyFn, normalizer) {
-      const map = new Map();
-      const seenSales = new Set();
-      matches.forEach(m => {
-        const raw = (m.lead?.[platformKey] ?? '').toString();
-        const platform = (normalizer ? normalizer(raw) : raw) || 'Unknown';
-        const revenueRaw = m.sale?.[revenueKey];
-        const revenue = parseFloat((revenueRaw ?? '').toString().replace(/[^0-9.\-]/g, '')) || 0;
+    function headersChanged(){
+      fillSelect('#sEmail',state.sales.headers);fillSelect('#sPhone',state.sales.headers);fillSelect('#sName',state.sales.headers);fillSelect('#sRevenue',state.sales.headers);
+      fillSelect('#lEmail',state.leads.headers);fillSelect('#lPhone',state.leads.headers);fillSelect('#lName',state.leads.headers);fillSelect('#lPlatform',state.leads.headers);
+    }
 
-        if (!map.has(platform)) map.set(platform, { platform, leads: 0, revenue: 0 });
-        const obj = map.get(platform);
-        obj.leads += 1;
-
-        const k = saleKeyFn(m.sale);
-        if (!seenSales.has(k)) { obj.revenue += revenue; seenSales.add(k); }
+    function compute(){
+      const sEmail=$('#sEmail').value, sPhone=$('#sPhone').value, sName=$('#sName').value, sRevenue=$('#sRevenue').value;
+      const lEmail=$('#lEmail').value, lPhone=$('#lPhone').value, lName=$('#lName').value, lPlatform=$('#lPlatform').value;
+      if(!state.sales.rows.length||!state.leads.rows.length||!sRevenue||!lPlatform||( !sEmail && !sPhone && !sName) || ( !lEmail && !lPhone && !lName)){
+        renderResults({matches:[],platformSummary:[],totalRevenue:0});
+        return;
+      }
+      const enableFuzzy=$('#enableFuzzy').checked; const nameThreshold=parseFloat($('#nameThreshold').value);
+      const {matches,unmatchedLeads,unmatchedSales}=matchRecords({
+        sales:state.sales.rows,leads:state.leads.rows,
+        mapSales:{email:sEmail,phone:sPhone,name:sName,revenue:sRevenue},
+        mapLeads:{email:lEmail,phone:lPhone,name:lName},
+        options:{enableFuzzy,nameThreshold}
       });
-      return Array.from(map.values()).sort((a,b) => b.revenue - a.revenue);
+      const saleKey=makeSaleKeyFactory(sEmail,sPhone,sName,sRevenue);
+      const summary=groupByPlatformSummaryDedup(matches,lPlatform,sRevenue,saleKey,normalizePlatformRaw);
+      // total revenue de-duped
+      const seen=new Set(); let total=0; matches.forEach(m=>{const k=saleKey(m.sale); if(!seen.has(k)){const rev=parseFloat((m.sale?.[sRevenue]??'').toString().replace(/[^0-9.\-]/g,''))||0; total+=rev; seen.add(k)}});
+      current={matches,unmatchedLeads,unmatchedSales,platformSummary:summary,totalRevenue:total};
+      renderResults(current);
     }
 
-    function App() {
-      const [salesFile, setSalesFile] = useState(null);
-      const [leadsFile, setLeadsFile] = useState(null);
-
-      const salesHeaders = useMemo(() => salesFile?.headers || [], [salesFile]);
-      const leadsHeaders = useMemo(() => leadsFile?.headers || [], [leadsFile]);
-
-      // Column mapping
-      const [sEmail, setSEmail] = useState("");
-      const [sPhone, setSPhone] = useState("");
-      const [sName, setSName] = useState("");
-      const [sRevenue, setSRevenue] = useState("");
-
-      const [lEmail, setLEmail] = useState("");
-      const [lPhone, setLPhone] = useState("");
-      const [lName, setLName] = useState("");
-      const [lPlatform, setLPlatform] = useState("");
-
-      // Fuzzy options
-      const [enableFuzzy, setEnableFuzzy] = useState(true);
-      const [nameThreshold, setNameThreshold] = useState(0.9);
-
-      // Platform aliases (editable)
-      const defaultAliasText = `Facebook: fb, facebook\nTikTok: tt, tiktok\nYouTube: yt, youtube`;
-      const [aliasText, setAliasText] = useState(defaultAliasText);
-      const aliasMap = useMemo(() => {
-        const map = new Map();
-        aliasText.split(/\n+/).forEach(line => {
-          const parts = line.split(':');
-          if (parts.length < 2) return;
-          const canonical = parts[0].trim();
-          const aliases = parts[1].split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-          if (canonical) map.set(canonical.toLowerCase(), canonical);
-          aliases.forEach(a => map.set(a, canonical));
-        });
-        return map;
-      }, [aliasText]);
-
-      const ready = salesFile && leadsFile && sRevenue && lPlatform &&
-        (sEmail || sPhone || sName) && (lEmail || lPhone || lName);
-
-      const { matches, unmatchedLeads, unmatchedSales } = useMemo(() => {
-        if (!ready) return { matches: [], unmatchedLeads: [], unmatchedSales: [] };
-        return matchRecords({
-          sales: salesFile.data,
-          leads: leadsFile.data,
-          mapSales: { email: sEmail, phone: sPhone, name: sName, revenue: sRevenue },
-          mapLeads: { email: lEmail, phone: lPhone, name: lName },
-          options: { enableFuzzy, nameThreshold }
-        });
-      }, [ready, salesFile, leadsFile, sEmail, sPhone, sName, sRevenue, lEmail, lPhone, lName, enableFuzzy, nameThreshold]);
-
-      const saleKey = useMemo(() => makeSaleKeyFactory(sEmail, sPhone, sName, sRevenue), [sEmail, sPhone, sName, sRevenue]);
-
-      const platformSummary = useMemo(() => {
-        if (!ready) return [];
-        const normalizer = (raw) => normalizePlatformRaw(raw, aliasMap);
-        return groupByPlatformSummaryDedup(matches, lPlatform, sRevenue, saleKey, normalizer);
-      }, [matches, ready, lPlatform, sRevenue, aliasMap, saleKey]);
-
-      const totalRevenue = useMemo(() => {
-        const seen = new Set();
-        let sum = 0;
-        matches.forEach(m => {
-          const k = saleKey(m.sale);
-          if (!seen.has(k)) {
-            const revenue = parseFloat((m.sale?.[sRevenue] ?? '').toString().replace(/[^0-9.\-]/g, '')) || 0;
-            sum += revenue;
-            seen.add(k);
-          }
-        });
-        return sum;
-      }, [matches, sRevenue, saleKey]);
-
-      const downloadMatches = () => {
-        const rows = matches.map(m => ({
-          matched_on: m.matchedOn,
-          confidence: m.confidence,
-          platform: normalizePlatformRaw((m.lead?.[lPlatform] ?? '').toString(), aliasMap),
-          revenue: m.sale?.[sRevenue] ?? '',
-          lead_email: m.lead?.[lEmail] ?? '',
-          sale_email: m.sale?.[sEmail] ?? '',
-          lead_phone: m.lead?.[lPhone] ?? '',
-          sale_phone: m.sale?.[sPhone] ?? '',
-          lead_name: m.lead?.[lName] ?? '',
-          sale_name: m.sale?.[sName] ?? '',
-        }));
-        downloadCSV('matched_leads.csv', rows);
-      };
-
-      const downloadPlatformSummary = () => {
-        const rows = platformSummary.map(r => ({
-          platform: r.platform,
-          leads: r.leads,
-          revenue: r.revenue.toFixed(2)
-        }));
-        downloadCSV('platform_summary.csv', rows);
-      };
-
-      const downloadUnmatched = () => {
-        const leadRows = unmatchedLeads.map(l => ({
-          lead_email: l[lEmail] ?? '',
-          lead_phone: l[lPhone] ?? '',
-          lead_name: l[lName] ?? '',
-          platform: l[lPlatform] ?? ''
-        }));
-        downloadCSV('unmatched_leads.csv', leadRows);
-
-        const saleRows = unmatchedSales.map(s => ({
-          sale_email: s[sEmail] ?? '',
-          sale_phone: s[sPhone] ?? '',
-          sale_name: s[sName] ?? '',
-          revenue: s[sRevenue] ?? ''
-        }));
-        downloadCSV('unmatched_sales.csv', saleRows);
-      };
-
-      return (
-        <div className="max-w-7xl mx-auto p-6">
-          <header className="mb-6">
-            <h1 className="text-2xl md:text-3xl font-bold">Lead ⇄ Sales Matcher <span className="text-gray-400">(Upgraded)</span></h1>
-            <p className="text-sm text-gray-600 mt-1">Smarter matching, de-duped revenue, exports, and fuzzy name matching.</p>
-          </header>
-
-          <div className="grid md:grid-cols-2 gap-6 mb-6">
-            <div className="rounded-2xl border p-4 bg-white">
-              <h2 className="font-semibold mb-3">1) Upload Sales CSV</h2>
-              <FilePicker label="Sales CSV" onLoad={setSalesFile} />
-              {salesFile && (
-                <div className="mt-3 text-xs text-gray-600">
-                  Loaded <strong>{salesFile.fileName}</strong> with {salesFile.data.length.toLocaleString()} rows.
-                </div>
-              )}
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <Select label="Sales: Email"   value={sEmail}    onChange={setSEmail}  options={salesHeaders} />
-                <Select label="Sales: Phone"   value={sPhone}    onChange={setSPhone}  options={salesHeaders} />
-                <Select label="Sales: Name"    value={sName}     onChange={setSName}   options={salesHeaders} />
-                <Select label="Sales: Revenue $" value={sRevenue} onChange={setSRevenue} options={salesHeaders} />
-              </div>
-            </div>
-
-            <div className="rounded-2xl border p-4 bg-white">
-              <h2 className="font-semibold mb-3">2) Upload Lead Database CSV</h2>
-              <FilePicker label="Leads CSV" onLoad={setLeadsFile} />
-              {leadsFile && (
-                <div className="mt-3 text-xs text-gray-600">
-                  Loaded <strong>{leadsFile.fileName}</strong> with {leadsFile.data.length.toLocaleString()} rows.
-                </div>
-              )}
-              <div className="mt-4 grid grid-cols-2 gap-3">
-                <Select label="Leads: Email"   value={lEmail}     onChange={setLEmail}    options={leadsHeaders} />
-                <Select label="Leads: Phone"   value={lPhone}     onChange={setLPhone}    options={leadsHeaders} />
-                <Select label="Leads: Name"    value={lName}      onChange={setLName}     options={leadsHeaders} />
-                <Select label="Leads: Platform" value={lPlatform} onChange={setLPlatform} options={leadsHeaders} />
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border p-4 bg-white mb-6">
-            <h2 className="font-semibold mb-2">3) Matching Options</h2>
-            <div className="grid md:grid-cols-3 gap-4 text-sm">
-              <div className="flex items-center gap-2">
-                <input id="fuzzy" type="checkbox" checked={enableFuzzy} onChange={(e)=>setEnableFuzzy(e.target.checked)} />
-                <label htmlFor="fuzzy">Enable fuzzy name matching</label>
-              </div>
-              <div className="col-span-2 flex items-center gap-3">
-                <label className="whitespace-nowrap">Name threshold: {nameThreshold.toFixed(2)}</label>
-                <input type="range" min="0.80" max="0.99" step="0.01" value={nameThreshold} onChange={(e)=>setNameThreshold(parseFloat(e.target.value))} className="w-full" />
-              </div>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border p-4 bg-white mb-6">
-            <h2 className="font-semibold mb-2">4) Platform Aliases (optional)</h2>
-            <p className="text-xs text-gray-600 mb-2">
-              Map abbreviations to a canonical name. One line per platform. Format: <code>Canonical: alias1, alias2</code>
-            </p>
-            <textarea
-              value={aliasText}
-              onChange={(e) => setAliasText(e.target.value)}
-              className="w-full rounded-xl border p-3 text-sm font-mono min-h-[110px]"
-            />
-            <div className="text-xs text-gray-500 mt-2">
-              Examples for Facebook/FB, TikTok/TT, YouTube/YT. Add your own (e.g., <em>Google: gads, google ads, sem</em>).
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-4 mb-6">
-            <SummaryCard title="Files" value={(salesFile ? 1 : 0) + (leadsFile ? 1 : 0) + "/2" sub="Uploads ready" />
-            <SummaryCard title="Matches" value={matches.length.toLocaleString()} sub="Lead ↔︎ Sale pairs" />
-            <SummaryCard title="Platforms" value={platformSummary.length.toLocaleString()} sub="With at least one match" />
-            <SummaryCard title="Revenue (All)" value={`$${totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} sub="De-duped: each sale counted once" />
-          </div>
-
-          <div className="mb-4 flex flex-wrap gap-3">
-            <button
-              disabled={!ready || matches.length === 0}
-              onClick={downloadMatches}
-              className={`px-4 py-2 rounded-xl text-sm font-medium shadow-sm ${(!ready || matches.length===0) ? 'bg-gray-200 text-gray-500' : 'bg-black text-white'}`}
-            >
-              Download Matched CSV
-            </button>
-            <button
-              disabled={!ready || platformSummary.length === 0}
-              onClick={downloadPlatformSummary}
-              className={`px-4 py-2 rounded-xl text-sm font-medium shadow-sm ${(!ready || platformSummary.length===0) ? 'bg-gray-200 text-gray-500' : 'bg-black text-white'}`}
-            >
-              Download Platform Summary CSV
-            </button>
-            <button
-              disabled={!ready}
-              onClick={downloadUnmatched}
-              className={`px-4 py-2 rounded-xl text-sm font-medium shadow-sm ${!ready ? 'bg-gray-200 text-gray-500' : 'bg-white text-gray-900 border'}`}
-            >
-              Download Unmatched (Leads & Sales)
-            </button>
-          </div>
-
-          <div className="rounded-2xl border bg-white">
-            <div className="p-4 border-b flex items-center justify-between">
-              <h3 className="font-semibold">Platform Summary</h3>
-              <div className="text-xs text-gray-500">Grouped by lead platform with revenue sum (de-duped by sale)</div>
-            </div>
-            <div className="p-4 overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="text-left text-gray-600">
-                    <th className="px-3 py-2">Platform</th>
-                    <th className="px-3 py-2">Matched Leads</th>
-                    <th className="px-3 py-2">Revenue</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {platformSummary.map((r, idx) => (
-                    <tr key={idx} className="border-t">
-                      <td className="px-3 py-2">{r.platform}</td>
-                      <td className="px-3 py-2">{r.leads.toLocaleString()}</td>
-                      <td className="px-3 py-2">${r.revenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                    </tr>
-                  ))}
-                  {platformSummary.length === 0 && (
-                    <tr><td className="px-3 py-6 text-gray-500" colSpan={3}>No data yet. Upload files and map columns.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="rounded-2xl border bg-white mt-6">
-            <div className="p-4 border-b flex items-center justify-between">
-              <h3 className="font-semibold">Matched Rows (Preview)</h3>
-              <div className="text-xs text-gray-500">Shows up to 200 matches</div>
-            </div>
-            <div className="p-4 overflow-x-auto">
-              <table className="min-w-full text-sm">
-                <thead>
-                  <tr className="text-left text-gray-600">
-                    <th className="px-3 py-2">Matched On</th>
-                    <th className="px-3 py-2">Conf.</th>
-                    <th className="px-3 py-2">Platform</th>
-                    <th className="px-3 py-2">Revenue</th>
-                    <th className="px-3 py-2">Lead Email</th>
-                    <th className="px-3 py-2">Sale Email</th>
-                    <th className="px-3 py-2">Lead Phone</th>
-                    <th className="px-3 py-2">Sale Phone</th>
-                    <th className="px-3 py-2">Lead Name</th>
-                    <th className="px-3 py-2">Sale Name</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {matches.slice(0,200).map((m, idx) => (
-                    <tr key={idx} className="border-t">
-                      <td className="px-3 py-2">{m.matchedOn}</td>
-                      <td className="px-3 py-2">{(m.confidence ?? '').toString()}</td>
-                      <td className="px-3 py-2">{normalizePlatformRaw((m.lead?.[lPlatform] ?? '').toString(), aliasMap)}</td>
-                      <td className="px-3 py-2">{(m.sale?.[sRevenue] ?? '').toString()}</td>
-                      <td className="px-3 py-2">{(m.lead?.[lEmail] ?? '').toString()}</td>
-                      <td className="px-3 py-2">{(m.sale?.[sEmail] ?? '').toString()}</td>
-                      <td className="px-3 py-2">{(m.lead?.[lPhone] ?? '').toString()}</td>
-                      <td className="px-3 py-2">{(m.sale?.[sPhone] ?? '').toString()}</td>
-                      <td className="px-3 py-2">{(m.lead?.[lName] ?? '').toString()}</td>
-                      <td className="px-3 py-2">{(m.sale?.[sName] ?? '').toString()}</td>
-                    </tr>
-                  ))}
-                  {matches.length === 0 && (
-                    <tr><td className="px-3 py-6 text-gray-500" colSpan={10}>No matches yet.</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <footer className="text-xs text-gray-500 mt-8">
-            <p>Tips: Ensure both CSVs include at least one of Email, Phone, or Name. Revenue should be numeric (e.g., 1250 or $1,250.00). Platform comes from your Lead DB.</p>
-            <p className="mt-2">Privacy: All processing happens in your browser. No data is uploaded to any server.</p>
-          </footer>
-        </div>
-      );
+    function renderResults({matches,platformSummary,totalRevenue}){
+      $('#matchesCount').textContent = (matches||[]).length.toLocaleString();
+      $('#platformsCount').textContent = (platformSummary||[]).length.toLocaleString();
+      $('#totalRevenue').textContent = money(totalRevenue||0);
+      // Buttons
+      $('#btnDownloadMatches').disabled = !(matches&&matches.length);
+      $('#btnDownloadSummary').disabled = !(platformSummary&&platformSummary.length);
+      $('#btnDownloadUnmatched').disabled = !(state.sales.rows.length&&state.leads.rows.length);
+      // Summary table
+      const tb=$('#tblSummary tbody');
+      tb.innerHTML='';
+      if(!platformSummary||!platformSummary.length){tb.innerHTML='<tr><td colspan="3" class="hint">No data yet. Upload files and map columns.</td></tr>';}
+      else{
+        platformSummary.forEach(r=>{
+          const tr=document.createElement('tr');
+          tr.innerHTML=`<td>${r.platform}</td><td>${r.leads.toLocaleString()}</td><td>${money(r.revenue)}</td>`;
+          tb.appendChild(tr);
+        })
+      }
+      // Matches preview
+      const mp=$('#tblMatches tbody'); mp.innerHTML='';
+      if(!matches||!matches.length){mp.innerHTML='<tr><td colspan="10" class="hint">No matches yet.</td></tr>';}
+      else{
+        const lEmail=$('#lEmail').value, lPhone=$('#lPhone').value, lName=$('#lName').value, lPlatform=$('#lPlatform').value;
+        const sEmail=$('#sEmail').value, sPhone=$('#sPhone').value, sName=$('#sName').value, sRevenue=$('#sRevenue').value;
+        matches.slice(0,200).forEach(m=>{
+          const tr=document.createElement('tr');
+          tr.innerHTML = `<td>${m.matchedOn}</td>
+            <td>${(m.confidence??'')}</td>
+            <td>${normalizePlatformRaw((m.lead?.[lPlatform]||''),aliasMap())}</td>
+            <td>${(m.sale?.[sRevenue]??'')}</td>
+            <td>${(m.lead?.[lEmail]??'')}</td>
+            <td>${(m.sale?.[sEmail]??'')}</td>
+            <td>${(m.lead?.[lPhone]??'')}</td>
+            <td>${(m.sale?.[sPhone]??'')}</td>
+            <td>${(m.lead?.[lName]??'')}</td>
+            <td>${(m.sale?.[sName]??'')}</td>`;
+          mp.appendChild(tr);
+        })
+      }
     }
 
-    // ===== Reusable UI components =====
-    function FilePicker({ label, onLoad }) {
-      const handle = async (e) => {
-        const file = e.target.files?.[0];
-        if (!file) return;
-        const text = await file.text();
-        const rows = parseCSV(text);
-        const objs = toObjects(rows);
-        onLoad({ fileName: file.name, headers: rows[0], data: objs });
-      };
-      return (
-        <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium text-gray-700">{label}</label>
-          <input type="file" accept=".csv" onChange={handle} className="block w-full text-sm text-gray-700" />
-          <p className="text-xs text-gray-500">CSV only. Data stays in your browser.</p>
-        </div>
-      );
-    }
+    // ===== Downloads =====
+    $('#btnDownloadMatches').addEventListener('click',()=>{
+      const lEmail=$('#lEmail').value, lPhone=$('#lPhone').value, lName=$('#lName').value, lPlatform=$('#lPlatform').value;
+      const sEmail=$('#sEmail').value, sPhone=$('#sPhone').value, sName=$('#sName').value, sRevenue=$('#sRevenue').value;
+      const rows=(current.matches||[]).map(m=>({
+        matched_on:m.matchedOn, confidence:m.confidence,
+        platform: normalizePlatformRaw((m.lead?.[lPlatform]||''),aliasMap()),
+        revenue: m.sale?.[sRevenue]||'',
+        lead_email: m.lead?.[lEmail]||'', sale_email: m.sale?.[sEmail]||'',
+        lead_phone: m.lead?.[lPhone]||'', sale_phone: m.sale?.[sPhone]||'',
+        lead_name: m.lead?.[lName]||'',   sale_name: m.sale?.[sName]||''
+      }));
+      downloadCSV('matched_leads.csv',rows)
+    })
 
-    function Select({ label, value, onChange, options }) {
-      return (
-        <div className="flex flex-col gap-1 min-w-[180px]">
-          <label className="text-xs text-gray-600">{label}</label>
-          <select value={value} onChange={(e) => onChange(e.target.value)} className="rounded-xl border px-3 py-2 text-sm">
-            <option value="">— Select —</option>
-            {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-          </select>
-        </div>
-      );
-    }
+    $('#btnDownloadSummary').addEventListener('click',()=>{
+      const rows=(current.platformSummary||[]).map(r=>({platform:r.platform,leads:r.leads,revenue:r.revenue.toFixed(2)}));
+      downloadCSV('platform_summary.csv',rows)
+    })
 
-    function SummaryCard({ title, value, sub }) {
-      return (
-        <div className="rounded-2xl border p-4 shadow-sm bg-white">
-          <div className="text-sm text-gray-500">{title}</div>
-          <div className="text-2xl font-semibold">{value}</div>
-          {sub && <div className="text-xs text-gray-500 mt-1">{sub}</div>}
-        </div>
-      );
-    }
+    $('#btnDownloadUnmatched').addEventListener('click',()=>{
+      const lEmail=$('#lEmail').value, lPhone=$('#lPhone').value, lName=$('#lName').value, lPlatform=$('#lPlatform').value;
+      const sEmail=$('#sEmail').value, sPhone=$('#sPhone').value, sName=$('#sName').value, sRevenue=$('#sRevenue').value;
+      const leadRows=(current.unmatchedLeads||[]).map(l=>({
+        lead_email:l[lEmail]||'', lead_phone:l[lPhone]||'', lead_name:l[lName]||'', platform:l[lPlatform]||''
+      }));
+      downloadCSV('unmatched_leads.csv',leadRows);
+      const saleRows=(current.unmatchedSales||[]).map(s=>({
+        sale_email:s[sEmail]||'', sale_phone:s[sPhone]||'', sale_name:s[sName]||'', revenue:s[sRevenue]||''
+      }));
+      downloadCSV('unmatched_sales.csv',saleRows)
+    })
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
+    // ===== Inputs & events =====
+    $('#salesFile').addEventListener('change',async(e)=>{
+      const f=e.target.files?.[0]; if(!f) return; state.sales.file=f; state.sales.rows=await readCSV(f); state.sales.headers=Object.keys(state.sales.rows[0]||{}); updateMeta(); headersChanged(); compute();
+    })
+    $('#leadsFile').addEventListener('change',async(e)=>{
+      const f=e.target.files?.[0]; if(!f) return; state.leads.file=f; state.leads.rows=await readCSV(f); state.leads.headers=Object.keys(state.leads.rows[0]||{}); updateMeta(); headersChanged(); compute();
+    })
+
+    ;['sEmail','sPhone','sName','sRevenue','lEmail','lPhone','lName','lPlatform','enableFuzzy','nameThreshold','aliasText'].forEach(id=>{
+      document.getElementById(id).addEventListener(id==='nameThreshold'?'input':'change',()=>{ if(id==='nameThreshold'){ document.getElementById('thVal').textContent = parseFloat(document.getElementById('nameThreshold').value).toFixed(2);} compute(); })
+    })
+
   </script>
 </body>
 </html>
