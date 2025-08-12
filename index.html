@@ -1,476 +1,510 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Lead ⇄ Sales Matcher — Offline (Email+Phone required)</title>
-  <style>
-    :root{--bg:#f7f7f8;--card:#fff;--fg:#0f172a;--muted:#64748b;--border:#e5e7eb;--accent:#111827}
-    *{box-sizing:border-box}
-    body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
-    .wrap{max-width:1120px;margin:32px auto;padding:0 16px}
-    h1{font-size:24px;margin:0 0 6px}
-    .sub{color:var(--muted);font-size:12px;margin-bottom:18px}
-    .grid{display:grid;gap:16px}
-    @media(min-width:900px){.grid-2{grid-template-columns:1fr 1fr}}
-    .card{background:var(--card);border:1px solid var(--border);border-radius:16px}
-    .card .hd{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
-    .card .bd{padding:16px}
-    label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}
-    input[type=file],select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:#fff}
-    textarea{min-height:110px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
-    .row{display:grid;gap:12px}
-    @media(min-width:700px){.row-2{grid-template-columns:1fr 1fr}}
-    .btn{padding:10px 14px;border-radius:12px;border:1px solid var(--border);background:#fff;color:#111;cursor:pointer}
-    .btn[disabled]{opacity:.5;cursor:not-allowed}
-    .btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
-    .pill{display:inline-block;background:#eef2ff;color:#3730a3;padding:2px 8px;border-radius:999px;font-size:12px}
-    .summary{display:flex;flex-wrap:wrap;gap:12px;margin:18px 0}
-    .chip{background:#fff;border:1px solid var(--border);border-radius:14px;padding:10px 14px}
-    .num{font-weight:700}
-    .hint{color:var(--muted);font-size:12px}
-    table{width:100%;border-collapse:collapse}
-    th,td{padding:10px 12px;text-align:left;border-top:1px solid var(--border);vertical-align:top}
-    th{color:var(--muted);font-weight:600}
-    .footer{color:var(--muted);font-size:12px;margin-top:22px}
-  </style>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Lead ⇄ Sales Matcher — Offline (Email+Phone required)</title>
+<style>
+:root{--bg:#f7f7f8;--card:#fff;--fg:#0f172a;--muted:#64748b;--border:#e5e7eb;--accent:#111827}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial}
+.wrap{max-width:1120px;margin:32px auto;padding:0 16px}
+h1{font-size:24px;margin:0 0 6px}
+.sub{color:var(--muted);font-size:12px;margin-bottom:18px}
+.grid{display:grid;gap:16px}
+@media(min-width:900px){.grid-2{grid-template-columns:1fr 1fr}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:16px}
+.card .hd{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.card .bd{padding:16px}
+label{font-size:12px;color:var(--muted);display:block;margin-bottom:4px}
+input[type=file],select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:12px;background:#fff}
+textarea{min-height:110px;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace}
+.row{display:grid;gap:12px}
+@media(min-width:700px){.row-2{grid-template-columns:1fr 1fr}}
+.btn{padding:10px 14px;border-radius:12px;border:1px solid var(--border);background:#fff;color:#111;cursor:pointer}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.btn.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.pill{display:inline-block;background:#eef2ff;color:#3730a3;padding:2px 8px;border-radius:999px;font-size:12px}
+.summary{display:flex;flex-wrap:wrap;gap:12px;margin:18px 0}
+.chip{background:#fff;border:1px solid var(--border);border-radius:14px;padding:10px 14px}
+.num{font-weight:700}
+.hint{color:var(--muted);font-size:12px}
+table{width:100%;border-collapse:collapse}
+th,td{padding:10px 12px;text-align:left;border-top:1px solid var(--border);vertical-align:top}
+th{color:var(--muted);font-weight:600}
+.footer{color:var(--muted);font-size:12px;margin-top:22px}
+small.debug{display:block;color:#475569;margin-top:6px;opacity:.9;font-family:ui-monospace,monospace}
+</style>
 </head>
 <body>
-  <div class="wrap">
-    <h1>Lead ⇄ Sales Matcher <span class="pill">Offline</span></h1>
-    <div class="sub">Shows only matches where Email <em>and</em> Phone both match (confidence = 1). Name-only never matches.</div>
+<div class="wrap">
+  <h1>Lead ⇄ Sales Matcher <span class="pill">Offline</span></h1>
+  <div class="sub">Shows only matches where Email <em>and</em> Phone both match (confidence = 1). Name-only never matches.</div>
 
-    <div class="grid grid-2">
-      <div class="card">
-        <div class="hd"><strong>1) Upload Sales CSV</strong></div>
-        <div class="bd">
-          <div class="row row-2">
-            <div>
-              <label>Sales CSV</label>
-              <input id="salesFile" type="file" accept=".csv" />
-              <div class="hint" id="salesMeta"></div>
-            </div>
-          </div>
-          <div class="row row-2" style="margin-top:12px">
-            <div><label>Sales: Email</label><select id="sEmail"></select></div>
-            <div><label>Sales: Phone</label><select id="sPhone"></select></div>
-            <div><label>Sales: Name</label><select id="sName"></select></div>
-            <div><label>Sales: Revenue $</label><select id="sRevenue"></select></div>
-          </div>
-        </div>
-      </div>
-
-      <div class="card">
-        <div class="hd"><strong>2) Upload Lead Database CSV</strong></div>
-        <div class="bd">
-          <div class="row row-2">
-            <div>
-              <label>Leads CSV</label>
-              <input id="leadsFile" type="file" accept=".csv" />
-              <div class="hint" id="leadsMeta"></div>
-            </div>
-          </div>
-          <div class="row row-2" style="margin-top:12px">
-            <div><label>Leads: Email</label><select id="lEmail"></select></div>
-            <div><label>Leads: Phone</label><select id="lPhone"></select></div>
-            <div><label>Leads: Name</label><select id="lName"></select></div>
-            <div><label>Leads: Platform</label><select id="lPlatform"></select></div>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <div class="hd"><strong>Platform Aliases (optional)</strong></div>
+  <div class="grid grid-2">
+    <div class="card">
+      <div class="hd"><strong>1) Upload Sales CSV</strong></div>
       <div class="bd">
-        <div class="hint" style="margin-bottom:8px">
-          Substring bucketing is built-in for Facebook/YouTube/TikTok; alias map is secondary.
-          Format per line: <code>Canonical: alias1, alias2</code>
+        <div class="row row-2">
+          <div>
+            <label>Sales CSV</label>
+            <input id="salesFile" type="file" accept=".csv" />
+            <div class="hint" id="salesMeta"></div>
+            <small class="debug" id="salesHeadersDebug"></small>
+          </div>
         </div>
-        <textarea id="aliasText">Facebook: fb, facebook
-TikTok: tt, tiktok
-YouTube: yt, youtube</textarea>
+        <div class="row row-2" style="margin-top:12px">
+          <div><label>Sales: Email</label><select id="sEmail"></select></div>
+          <div><label>Sales: Phone</label><select id="sPhone"></select></div>
+          <div><label>Sales: Name</label><select id="sName"></select></div>
+          <div><label>Sales: Revenue $</label><select id="sRevenue"></select></div>
+        </div>
       </div>
-    </div>
-
-    <div class="summary">
-      <div class="chip">Files: <span class="num" id="filesCount">0/2</span></div>
-      <div class="chip">Matches: <span class="num" id="matchesCount">0</span></div>
-      <div class="chip">Platforms: <span class="num" id="platformsCount">0</span></div>
-      <div class="chip">Revenue (All): <span class="num" id="totalRevenue">$0.00</span></div>
-    </div>
-
-    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
-      <button class="btn primary" id="btnDownloadMatches" disabled>Download Matched CSV</button>
-      <button class="btn primary" id="btnDownloadSummary" disabled>Download Platform Summary CSV</button>
-      <button class="btn" id="btnDownloadUnmatched" disabled>Download Unmatched (Leads & Sales)</button>
     </div>
 
     <div class="card">
-      <div class="hd"><strong>Platform Summary</strong><span class="hint">&nbsp;&nbsp;De-duped revenue by sale</span></div>
+      <div class="hd"><strong>2) Upload Lead Database CSV</strong></div>
       <div class="bd">
-        <div style="overflow:auto">
-          <table id="tblSummary">
-            <thead><tr><th>Platform</th><th>Matched Leads</th><th>Revenue</th></tr></thead>
-            <tbody><tr><td colspan="3" class="hint">No data yet. Upload files and map columns.</td></tr></tbody>
-          </table>
+        <div class="row row-2">
+          <div>
+            <label>Leads CSV</label>
+            <input id="leadsFile" type="file" accept=".csv" />
+            <div class="hint" id="leadsMeta"></div>
+            <small class="debug" id="leadsHeadersDebug"></small>
+          </div>
+        </div>
+        <div class="row row-2" style="margin-top:12px">
+          <div><label>Leads: Email</label><select id="lEmail"></select></div>
+          <div><label>Leads: Phone</label><select id="lPhone"></select></div>
+          <div><label>Leads: Name</label><select id="lName"></select></div>
+          <div><label>Leads: Platform</label><select id="lPlatform"></select></div>
         </div>
       </div>
-    </div>
-
-    <div class="card" style="margin-top:16px">
-      <div class="hd"><strong>Matched Rows (Preview)</strong><span class="hint">&nbsp;&nbsp;Only confidence = 1 (Email + Phone)</span></div>
-      <div class="bd">
-        <div style="overflow:auto">
-          <table id="tblMatches">
-            <thead>
-              <tr>
-                <th>Matched On</th>
-                <th>Conf.</th>
-                <th>Platform</th>
-                <th>Revenue</th>
-                <th>Lead Email</th>
-                <th>Sale Email</th>
-                <th>Lead Phone</th>
-                <th>Sale Phone</th>
-                <th>Lead Name</th>
-                <th>Sale Name</th>
-              </tr>
-            </thead>
-            <tbody><tr><td colspan="10" class="hint">No matches yet.</td></tr></tbody>
-          </table>
-        </div>
-      </div>
-    </div>
-
-    <div class="footer">
-      Tips: Both CSVs should include Email & Phone for best results. Revenue should be numeric (e.g., 1250 or $1,250.00). Platform comes from your Lead DB. All processing happens locally in your browser.
     </div>
   </div>
 
-  <script>
-    // ===== CSV Parser =====
-    function parseCSV(text){
-      const rows=[];let i=0,field='',row=[],inQ=false;
-      while(i<text.length){
-        const c=text[i];
-        if(c==='\"'){ if(inQ&&text[i+1]==='\"'){field+='\"';i+=2;continue} inQ=!inQ; i++; continue }
-        if(!inQ&&c===','){ row.push(field); field=''; i++; continue }
-        if(!inQ&&c==='\\n'){ row.push(field); rows.push(row); field=''; row=[]; i++; continue }
-        if(!inQ&&c==='\\r'){ i++; continue }
-        field+=c; i++;
-      }
-      row.push(field); rows.push(row);
-      return rows;
-    }
-    function toObjects(rows){
-      if(!rows||!rows.length) return [];
-      const headers=rows[0].map(h=>h.trim());
-      return rows.slice(1)
-        .filter(r=>r.some(x=>(x??'').toString().trim()!==''))
-        .map(r=>{const o={}; headers.forEach((h,i)=>o[h]=r[i]??''); return o;});
-    }
-    function readCSV(file){return new Promise(res=>{const r=new FileReader(); r.onload=()=>res(toObjects(parseCSV(r.result))); r.readAsText(file);});}
+  <div class="card" style="margin-top:16px">
+    <div class="hd"><strong>Platform Aliases (optional)</strong></div>
+    <div class="bd">
+      <div class="hint" style="margin-bottom:8px">
+        Substring bucketing is built-in for Facebook/YouTube/TikTok; alias map is secondary.
+        Format per line: <code>Canonical: alias1, alias2</code>
+      </div>
+      <textarea id="aliasText">Facebook: fb, facebook
+TikTok: tt, tiktok
+YouTube: yt, youtube</textarea>
+    </div>
+  </div>
 
-    // ===== Normalizers =====
-    const firstItem=(s)=>(s||'').toString().split(/[;,]/)[0].trim();
-    function normalizeEmail(e){
-      const raw=firstItem(e).toLowerCase(); if(!raw) return '';
-      const parts=raw.split('@'); if(parts.length<2) return raw;
-      const local=parts[0], domain=parts[1];
-      if(domain==='gmail.com') return local.replace(/\\./g,'')+'@'+domain;
-      return local+'@'+domain;
-    }
-    function normalizePhone(p){ return (p||'').toString().replace(/\\D+/g,'').replace(/^1(\\d{10})$/,'$1'); }
-    function normalizeName(n){ return (n||'').toString().trim().toLowerCase().replace(/\\s+/g,' '); }
+  <div class="summary">
+    <div class="chip">Files: <span class="num" id="filesCount">0/2</span></div>
+    <div class="chip">Matches: <span class="num" id="matchesCount">0</span></div>
+    <div class="chip">Platforms: <span class="num" id="platformsCount">0</span></div>
+    <div class="chip">Revenue (All): <span class="num" id="totalRevenue">$0.00</span></div>
+  </div>
 
-    // ===== Platform bucketing by substring; alias fallback =====
-    function normalizePlatformRaw(p, map){
-      const raw=(p||'').toString().trim();
-      if(!raw) return 'Unknown';
-      if(/facebook|\\bfb\\b/i.test(raw)) return 'Facebook';
-      if(/youtube|\\byt\\b/i.test(raw)) return 'YouTube';
-      if(/tiktok|\\btt\\b/i.test(raw)) return 'TikTok';
-      const key=raw.toLowerCase();
-      if(map && map.has(key)) return map.get(key);
-      return raw;
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+    <button class="btn primary" id="btnDownloadMatches" disabled>Download Matched CSV</button>
+    <button class="btn primary" id="btnDownloadSummary" disabled>Download Platform Summary CSV</button>
+    <button class="btn" id="btnDownloadUnmatched" disabled>Download Unmatched (Leads & Sales)</button>
+  </div>
+
+  <div class="card">
+    <div class="hd"><strong>Platform Summary</strong><span class="hint">&nbsp;&nbsp;De-duped revenue by sale</span></div>
+    <div class="bd">
+      <div style="overflow:auto">
+        <table id="tblSummary">
+          <thead><tr><th>Platform</th><th>Matched Leads</th><th>Revenue</th></tr></thead>
+          <tbody><tr><td colspan="3" class="hint">No data yet. Upload files and map columns.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <div class="hd"><strong>Matched Rows (Preview)</strong><span class="hint">&nbsp;&nbsp;Only confidence = 1 (Email + Phone)</span></div>
+    <div class="bd">
+      <div style="overflow:auto">
+        <table id="tblMatches">
+          <thead>
+            <tr>
+              <th>Matched On</th>
+              <th>Conf.</th>
+              <th>Platform</th>
+              <th>Revenue</th>
+              <th>Lead Email</th>
+              <th>Sale Email</th>
+              <th>Lead Phone</th>
+              <th>Sale Phone</th>
+              <th>Lead Name</th>
+              <th>Sale Name</th>
+            </tr>
+          </thead>
+          <tbody><tr><td colspan="10" class="hint">No matches yet.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="footer">
+    Tips: Both CSVs should include Email & Phone for best results. Revenue should be numeric (e.g., 1250 or $1,250.00). Platform comes from your Lead DB. All processing happens locally in your browser.
+  </div>
+</div>
+
+<script>
+  // ===== CSV Parser =====
+  function parseCSV(text){
+    const rows=[];let i=0,field='',row=[],inQ=false;
+    while(i<text.length){
+      const c=text[i];
+      if(c==='\"'){ if(inQ&&text[i+1]==='\"'){field+='\"';i+=2;continue} inQ=!inQ; i++; continue }
+      if(!inQ&&c===','){ row.push(field); field=''; i++; continue }
+      if(!inQ&&c==='\\n'){ row.push(field); rows.push(row); field=''; row=[]; i++; continue }
+      if(!inQ&&c==='\\r'){ i++; continue }
+      field+=c; i++;
     }
-    function aliasMap(){
-      const txt=document.querySelector('#aliasText').value;
-      const map=new Map();
-      txt.split(/\\n+/).forEach(line=>{
-        const parts=line.split(':');
-        if(parts.length<2) return;
-        const canonical=parts[0].trim();
-        const aliases=parts[1].split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
-        if(canonical) map.set(canonical.toLowerCase(),canonical);
-        aliases.forEach(a=>map.set(a,canonical));
+    row.push(field); rows.push(row);
+    return rows;
+  }
+  function toObjects(rows){
+    if(!rows||!rows.length) return [];
+    // Trim header cells; strip BOM
+    const h0 = (rows[0]||[]).map(h => (h||'').replace(/^\\ufeff/,'').trim());
+    return rows.slice(1)
+      .filter(r => r.some(x => (x??'').toString().trim()!==''))
+      .map(r => {
+        const o={}; h0.forEach((h,i)=>o[h]=r[i]??''); return o;
       });
-      return map;
-    }
+  }
+  function readCSV(file){return new Promise(res=>{const r=new FileReader(); r.onload=()=>res(toObjects(parseCSV(r.result))); r.readAsText(file);});}
 
-    // ===== DOM helpers =====
-    const $=sel=>document.querySelector(sel);
-    function fillSelect(sel,headers){
-      const el=$(sel);
-      el.innerHTML='<option value="">— Select —</option>'+(headers||[]).map(h=>`<option>${h}</option>`).join('');
-    }
-    function money(n){ return '$'+(n||0).toLocaleString(undefined,{maximumFractionDigits:2}); }
+  // ===== Normalizers =====
+  const firstItem=(s)=>(s||'').toString().split(/[;,]/)[0].trim();
+  function normalizeEmail(e){
+    const raw=firstItem(e).toLowerCase(); if(!raw) return '';
+    const parts=raw.split('@'); if(parts.length<2) return raw;
+    const local=parts[0], domain=parts[1];
+    if(domain==='gmail.com') return local.replace(/\\./g,'')+'@'+domain;
+    return local+'@'+domain;
+  }
+  function normalizePhone(p){ return (p||'').toString().replace(/\\D+/g,'').replace(/^1(\\d{10})$/,'$1'); }
+  function normalizeName(n){ return (n||'').toString().trim().toLowerCase().replace(/\\s+/g,' '); }
 
-    // ===== Global state =====
-    const state={ sales:{file:null,rows:[],headers:[]}, leads:{file:null,rows:[],headers:[]} };
+  // ===== Platform bucketing by substring; alias fallback =====
+  function normalizePlatformRaw(p, map){
+    const raw=(p||'').toString().trim();
+    if(!raw) return 'Unknown';
+    if(/facebook|\\bfb\\b/i.test(raw)) return 'Facebook';
+    if(/youtube|\\byt\\b/i.test(raw)) return 'YouTube';
+    if(/tiktok|\\btt\\b/i.test(raw)) return 'TikTok';
+    const key=raw.toLowerCase();
+    if(map && map.has(key)) return map.get(key);
+    return raw;
+  }
+  function aliasMap(){
+    const txt=document.querySelector('#aliasText').value;
+    const map=new Map();
+    txt.split(/\\n+/).forEach(line=>{
+      const parts=line.split(':'); if(parts.length<2) return;
+      const canonical=parts[0].trim();
+      const aliases=parts[1].split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+      if(canonical) map.set(canonical.toLowerCase(),canonical);
+      aliases.forEach(a=>map.set(a,canonical));
+    });
+    return map;
+  }
 
-    // ===== Matching rules =====
-    // Only create matches for:
-    //  - email+phone (confidence 1)
-    //  - (internal) email+name OR phone+name (confidence 0.9) – later filtered out
-    // Never create name-only matches.
-    function matchRecords({ sales, leads, mapSales, mapLeads }){
-      const sE=mapSales.email, sP=mapSales.phone, sN=mapSales.name;
-      const lE=mapLeads.email, lP=mapLeads.phone, lN=mapLeads.name;
+  // ===== DOM helpers =====
+  const $=sel=>document.querySelector(sel);
+  function fillSelect(sel,headers){
+    const el=$(sel);
+    const opts = (headers||[]).map(h=>`<option value="${h}">${h}</option>`).join('');
+    el.innerHTML = `<option value="">— Select —</option>${opts}`;
+  }
+  function money(n){ return '$'+(n||0).toLocaleString(undefined,{maximumFractionDigits:2}); }
 
-      // Index sales
-      const emailIdx=new Map(), phoneIdx=new Map(), compositeIdx=new Map();
-      sales.forEach(s=>{
-        const e=normalizeEmail(s?.[sE]);
-        const p=normalizePhone(s?.[sP]);
-        const n=normalizeName(s?.[sN]);
-        if(e) emailIdx.set(e,(emailIdx.get(e)||[]).concat(s));
-        if(p) phoneIdx.set(p,(phoneIdx.get(p)||[]).concat(s));
-        if(e && p) compositeIdx.set(`${e}|${p}`,(compositeIdx.get(`${e}|${p}`)||[]).concat(s));
-        s.__norm={e,p,n};
-      });
+  // ===== Global state =====
+  const state={ sales:{file:null,rows:[],headers:[]}, leads:{file:null,rows:[],headers:[]} };
 
-      const out=[];
-      leads.forEach(lead=>{
-        const le=normalizeEmail(lead?.[lE]);
-        const lp=normalizePhone(lead?.[lP]);
-        const ln=normalizeName(lead?.[lN]);
+  // ===== Smart auto-map helpers =====
+  const pick = (headers, patterns) => {
+    const idx=headers.findIndex(h => patterns.some(p=>p.test(h)));
+    return idx>=0 ? headers[idx] : '';
+  };
+  function autoMapSales(){
+    const H=state.sales.headers;
+    $('#sEmail').value   = pick(H,[/email/i, /e-?mail/i]);
+    $('#sPhone').value   = pick(H,[/phone|mobile|contact|cell|tel/i]);
+    $('#sName').value    = pick(H,[/^name$|full.?name|customer|client.?name|lead.?name/i]);
+    $('#sRevenue').value = pick(H,[/revenue|amount|sale|total|price|value|contract/i]);
+  }
+  function autoMapLeads(){
+    const H=state.leads.headers;
+    $('#lEmail').value    = pick(H,[/email/i, /e-?mail/i]);
+    $('#lPhone').value    = pick(H,[/phone|mobile|contact|cell|tel/i]);
+    $('#lName').value     = pick(H,[/^name$|full.?name|customer|client.?name|lead.?name/i]);
+    $('#lPlatform').value = pick(H,[/platform|source|channel|utm.?source|campaign/i]);
+  }
+  function showHeadersDebug(){
+    $('#salesHeadersDebug').textContent = state.sales.headers.length ? `Detected headers: ${state.sales.headers.join(' | ')}` : '';
+    $('#leadsHeadersDebug').textContent = state.leads.headers.length ? `Detected headers: ${state.leads.headers.join(' | ')}` : '';
+  }
 
-        let picks=[];
+  // ===== Matching rules =====
+  // Only create matches for:
+  //  - email+phone (confidence 1)
+  //  - (internal) email+name OR phone+name (confidence 0.9) – later filtered out
+  // Never create name-only matches.
+  function matchRecords({ sales, leads, mapSales, mapLeads }){
+    const sE=mapSales.email, sP=mapSales.phone, sN=mapSales.name;
+    const lE=mapLeads.email, lP=mapLeads.phone, lN=mapLeads.name;
 
-        // PERFECT: email AND phone
-        if(le && lp){
-          const perfects=compositeIdx.get(`${le}|${lp}`)||[];
-          perfects.forEach(sale=>{
-            const on=['email','phone'];
-            if(ln && sale.__norm.n===ln) on.push('name');
-            picks.push({ lead, sale, matchedOn:on.join('|'), confidence:1.0 });
-          });
-        }
+    // Index sales
+    const emailIdx=new Map(), phoneIdx=new Map(), compositeIdx=new Map();
+    sales.forEach(s=>{
+      const e=normalizeEmail(s?.[sE]);
+      const p=normalizePhone(s?.[sP]);
+      const n=normalizeName(s?.[sN]);
+      if(e) emailIdx.set(e,(emailIdx.get(e)||[]).concat(s));
+      if(p) phoneIdx.set(p,(phoneIdx.get(p)||[]).concat(s));
+      if(e && p) compositeIdx.set(`${e}|${p}`,(compositeIdx.get(`${e}|${p}`)||[]).concat(s));
+      s.__norm={e,p,n};
+    });
 
-        // PARTIALS (not shown): name + email OR name + phone
-        const already=new Set(picks.map(p=>p.sale));
-        if(ln && le){
-          (emailIdx.get(le)||[]).forEach(sale=>{
-            if(already.has(sale)) return;
-            if(sale.__norm.n && sale.__norm.n===ln){
-              picks.push({ lead, sale, matchedOn:'email|name', confidence:0.9 });
-            }
-          });
-        }
-        if(ln && lp){
-          (phoneIdx.get(lp)||[]).forEach(sale=>{
-            if(already.has(sale)) return;
-            if(sale.__norm.n && sale.__norm.n===ln){
-              picks.push({ lead, sale, matchedOn:'phone|name', confidence:0.9 });
-            }
-          });
-        }
+    const out=[];
+    leads.forEach(lead=>{
+      const le=normalizeEmail(lead?.[lE]);
+      const lp=normalizePhone(lead?.[lP]);
+      const ln=normalizeName(lead?.[lN]);
 
-        out.push(...picks);
-      });
-      return out;
-    }
+      let picks=[];
 
-    // ===== Sale de-dup key =====
-    function makeSaleKeyFactory(sEmail,sPhone,sName,sRevenue){
-      return function(s){
-        const e=normalizeEmail(s?.[sEmail]);
-        const p=normalizePhone(s?.[sPhone]);
-        const n=normalizeName(s?.[sName]);
-        const rev=(s?.[sRevenue]??'').toString().replace(/[^0-9.\-]/g,'');
-        return JSON.stringify([e,p,n,rev]);
-      };
-    }
-
-    // ===== Platform summary with de-duped revenue =====
-    function groupByPlatformSummaryDedup(matches,platformKey,revenueKey,saleKeyFn,normalizer){
-      const map=new Map(), seen=new Set();
-      matches.forEach(m=>{
-        const platform=(normalizer?normalizer(m.lead?.[platformKey]||'',aliasMap()):m.lead?.[platformKey]||'')||'Unknown';
-        const revenue=parseFloat((m.sale?.[revenueKey]??'').toString().replace(/[^0-9.\-]/g,''))||0;
-        if(!map.has(platform)) map.set(platform,{platform,leads:0,revenue:0});
-        const obj=map.get(platform); obj.leads+=1;
-        const k=saleKeyFn(m.sale);
-        if(!seen.has(k)){ obj.revenue+=revenue; seen.add(k); }
-      });
-      return Array.from(map.values()).sort((a,b)=>b.revenue-a.revenue);
-    }
-
-    // ===== CSV download =====
-    function downloadCSV(filename,rows){
-      if(!rows||!rows.length) return;
-      const headers=Object.keys(rows[0]);
-      const csv=[headers.join(',')]
-        .concat(rows.map(r=>headers.map(h=>{
-          const v=r[h]??''; const s=v.toString().replace(/\"/g,'\"\"');
-          return /[\",\\n]/.test(s)?('\"'+s+'\"'):s;
-        }).join(','))).join('\\n');
-      const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
-      const url=URL.createObjectURL(blob);
-      const a=document.createElement('a'); a.href=url; a.download=filename;
-      document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-    }
-
-    // ===== UI state/render =====
-    let current={matches:[],unmatchedLeads:[],unmatchedSales:[],platformSummary:[],totalRevenue:0};
-
-    function updateMeta(){
-      $('#salesMeta').textContent = state.sales.rows.length?`Loaded ${state.sales.file?.name||''} with ${state.sales.rows.length.toLocaleString()} rows.`:'';
-      $('#leadsMeta').textContent = state.leads.rows.length?`Loaded ${state.leads.file?.name||''} with ${state.leads.rows.length.toLocaleString()} rows.`:'';
-      $('#filesCount').textContent = (state.sales.rows.length?1:0) + (state.leads.rows.length?1:0) + "/2";
-    }
-    function headersChanged(){
-      fillSelect('#sEmail',state.sales.headers); fillSelect('#sPhone',state.sales.headers);
-      fillSelect('#sName',state.sales.headers);  fillSelect('#sRevenue',state.sales.headers);
-      fillSelect('#lEmail',state.leads.headers); fillSelect('#lPhone',state.leads.headers);
-      fillSelect('#lName',state.leads.headers);  fillSelect('#lPlatform',state.leads.headers);
-    }
-
-    function compute(){
-      const sEmail=$('#sEmail').value, sPhone=$('#sPhone').value, sName=$('#sName').value, sRevenue=$('#sRevenue').value;
-      const lEmail=$('#lEmail').value, lPhone=$('#lPhone').value, lName=$('#lName').value, lPlatform=$('#lPlatform').value;
-
-      // require mappings + files
-      if(!state.sales.rows.length||!state.leads.rows.length||!sRevenue||!lPlatform
-         || (!sEmail || !sPhone) || (!lEmail || !lPhone)) {
-        renderResults({matches:[],platformSummary:[],totalRevenue:0});
-        return;
-      }
-
-      const allMatches = matchRecords({
-        sales: state.sales.rows,
-        leads: state.leads.rows,
-        mapSales: { email: sEmail, phone: sPhone, name: sName },
-        mapLeads: { email: lEmail, phone: lPhone, name: lName }
-      });
-
-      // STRICT: show only confidence === 1 (email+phone)
-      const matches = allMatches.filter(m => m.confidence === 1);
-
-      // Unmatched based on final matches
-      const usedSales = new Set(matches.map(m => m.sale));
-      const usedLeads = new Set(matches.map(m => m.lead));
-      const unmatchedLeads = state.leads.rows.filter(l => !usedLeads.has(l));
-      const unmatchedSales = state.sales.rows.filter(s => !usedSales.has(s));
-
-      const saleKey=makeSaleKeyFactory(sEmail,sPhone,sName,sRevenue);
-      const summary=groupByPlatformSummaryDedup(matches,lPlatform,sRevenue,saleKey,normalizePlatformRaw);
-
-      // total revenue de-duped
-      const seen=new Set(); let total=0;
-      matches.forEach(m=>{
-        const k=saleKey(m.sale);
-        if(!seen.has(k)){
-          const rev=parseFloat((m.sale?.[sRevenue]??'').toString().replace(/[^0-9.\-]/g,''))||0;
-          total+=rev; seen.add(k);
-        }
-      });
-
-      current={matches,unmatchedLeads,unmatchedSales,platformSummary:summary,totalRevenue:total};
-      renderResults(current);
-    }
-
-    function renderResults({matches,platformSummary,totalRevenue}){
-      $('#matchesCount').textContent = (matches||[]).length.toLocaleString();
-      $('#platformsCount').textContent = (platformSummary||[]).length.toLocaleString();
-      $('#totalRevenue').textContent = money(totalRevenue||0);
-      $('#btnDownloadMatches').disabled = !(matches&&matches.length);
-      $('#btnDownloadSummary').disabled = !(platformSummary&&platformSummary.length);
-      $('#btnDownloadUnmatched').disabled = !(state.sales.rows.length&&state.leads.rows.length);
-
-      // Summary
-      const tb=$('#tblSummary tbody'); tb.innerHTML='';
-      if(!platformSummary||!platformSummary.length){
-        tb.innerHTML='<tr><td colspan="3" class="hint">No data yet. Upload files and map columns.</td></tr>';
-      } else {
-        platformSummary.forEach(r=>{
-          const tr=document.createElement('tr');
-          tr.innerHTML=`<td>${r.platform}</td><td>${r.leads.toLocaleString()}</td><td>${money(r.revenue)}</td>`;
-          tb.appendChild(tr);
+      // PERFECT: email AND phone
+      if(le && lp){
+        const perfects=compositeIdx.get(`${le}|${lp}`)||[];
+        perfects.forEach(sale=>{
+          const on=['email','phone'];
+          if(ln && sale.__norm.n===ln) on.push('name');
+          picks.push({ lead, sale, matchedOn:on.join('|'), confidence:1.0 });
         });
       }
 
-      // Matches preview
-      const mp=$('#tblMatches tbody'); mp.innerHTML='';
-      if(!matches||!matches.length){
-        mp.innerHTML='<tr><td colspan="10" class="hint">No matches yet.</td></tr>';
-      } else {
-        const lEmail=$('#lEmail').value, lPhone=$('#lPhone').value, lName=$('#lName').value, lPlatform=$('#lPlatform').value;
-        const sEmail=$('#sEmail').value, sPhone=$('#sPhone').value, sName=$('#sName').value, sRevenue=$('#sRevenue').value;
-        matches.slice(0,200).forEach(m=>{
-          const tr=document.createElement('tr');
-          tr.innerHTML = `<td>${m.matchedOn}</td>
-            <td>${(m.confidence??'')}</td>
-            <td>${normalizePlatformRaw((m.lead?.[lPlatform]||''),aliasMap())}</td>
-            <td>${(m.sale?.[sRevenue]??'')}</td>
-            <td>${(m.lead?.[lEmail]??'')}</td>
-            <td>${(m.sale?.[sEmail]??'')}</td>
-            <td>${(m.lead?.[lPhone]??'')}</td>
-            <td>${(m.sale?.[sPhone]??'')}</td>
-            <td>${(m.lead?.[lName]??'')}</td>
-            <td>${(m.sale?.[sName]??'')}</td>`;
-          mp.appendChild(tr);
+      // PARTIALS (not shown): name + email OR name + phone
+      const already=new Set(picks.map(p=>p.sale));
+      if(ln && le){
+        (emailIdx.get(le)||[]).forEach(sale=>{
+          if(already.has(sale)) return;
+          if(sale.__norm.n && sale.__norm.n===ln){
+            picks.push({ lead, sale, matchedOn:'email|name', confidence:0.9 });
+          }
         });
       }
+      if(ln && lp){
+        (phoneIdx.get(lp)||[]).forEach(sale=>{
+          if(already.has(sale)) return;
+          if(sale.__norm.n && sale.__norm.n===ln){
+            picks.push({ lead, sale, matchedOn:'phone|name', confidence:0.9 });
+          }
+        });
+      }
+
+      out.push(...picks);
+    });
+    return out;
+  }
+
+  // ===== Sale de-dup key =====
+  function makeSaleKeyFactory(sEmail,sPhone,sName,sRevenue){
+    return function(s){
+      const e=normalizeEmail(s?.[sEmail]);
+      const p=normalizePhone(s?.[sPhone]);
+      const n=normalizeName(s?.[sName]);
+      const rev=(s?.[sRevenue]??'').toString().replace(/[^0-9.\-]/g,'');
+      return JSON.stringify([e,p,n,rev]);
+    };
+  }
+
+  // ===== Platform summary with de-duped revenue =====
+  function groupByPlatformSummaryDedup(matches,platformKey,revenueKey,saleKeyFn,normalizer){
+    const map=new Map(), seen=new Set();
+    matches.forEach(m=>{
+      const platform=(normalizer?normalizer(m.lead?.[platformKey]||'',aliasMap()):m.lead?.[platformKey]||'')||'Unknown';
+      const revenue=parseFloat((m.sale?.[revenueKey]??'').toString().replace(/[^0-9.\-]/g,''))||0;
+      if(!map.has(platform)) map.set(platform,{platform,leads:0,revenue:0});
+      const obj=map.get(platform); obj.leads+=1;
+      const k=saleKeyFn(m.sale);
+      if(!seen.has(k)){ obj.revenue+=revenue; seen.add(k); }
+    });
+    return Array.from(map.values()).sort((a,b)=>b.revenue-a.revenue);
+  }
+
+  // ===== CSV download =====
+  function downloadCSV(filename,rows){
+    if(!rows||!rows.length) return;
+    const headers=Object.keys(rows[0]);
+    const csv=[headers.join(',')]
+      .concat(rows.map(r=>headers.map(h=>{
+        const v=r[h]??''; const s=v.toString().replace(/\"/g,'\"\"');
+        return /[\",\\n]/.test(s)?('\"'+s+'\"'):s;
+      }).join(','))).join('\\n');
+    const blob=new Blob([csv],{type:'text/csv;charset=utf-8;'});
+    const url=URL.createObjectURL(blob);
+    const a=document.createElement('a'); a.href=url; a.download=filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
+  }
+
+  // ===== UI state/render =====
+  let current={matches:[],unmatchedLeads:[],unmatchedSales:[],platformSummary:[],totalRevenue:0};
+  const state={ sales:{file:null,rows:[],headers:[]}, leads:{file:null,rows:[],headers:[]} };
+
+  function updateMeta(){
+    $('#salesMeta').textContent = state.sales.rows.length?`Loaded ${state.sales.file?.name||''} with ${state.sales.rows.length.toLocaleString()} rows.`:'';
+    $('#leadsMeta').textContent = state.leads.rows.length?`Loaded ${state.leads.file?.name||''} with ${state.leads.rows.length.toLocaleString()} rows.`:'';
+    $('#filesCount').textContent = (state.sales.rows.length?1:0) + (state.leads.rows.length?1:0) + "/2";
+    showHeadersDebug();
+  }
+  function headersChanged(){
+    fillSelect('#sEmail',state.sales.headers); fillSelect('#sPhone',state.sales.headers);
+    fillSelect('#sName',state.sales.headers);  fillSelect('#sRevenue',state.sales.headers);
+    fillSelect('#lEmail',state.leads.headers); fillSelect('#lPhone',state.leads.headers);
+    fillSelect('#lName',state.leads.headers);  fillSelect('#lPlatform',state.leads.headers);
+  }
+
+  function compute(){
+    const sEmail=$('#sEmail').value, sPhone=$('#sPhone').value, sName=$('#sName').value, sRevenue=$('#sRevenue').value;
+    const lEmail=$('#lEmail').value, lPhone=$('#lPhone').value, lName=$('#lName').value, lPlatform=$('#lPlatform').value;
+
+    if(!state.sales.rows.length||!state.leads.rows.length||!sRevenue||!lPlatform
+       || (!sEmail || !sPhone) || (!lEmail || !lPhone)) {
+      renderResults({matches:[],platformSummary:[],totalRevenue:0});
+      return;
     }
 
-    // ===== Downloads =====
-    document.querySelector('#btnDownloadMatches').addEventListener('click',()=>{
-      const lEmail=$('#lEmail').value, lPhone=$('#lPhone').value, lName=$('#lName').value, lPlatform=$('#lPlatform').value;
-      const sEmail=$('#sEmail').value, sPhone=$('#sPhone').value, sName=$('#sName').value, sRevenue=$('#sRevenue').value;
-      const rows=(current.matches||[]).map(m=>({
-        matched_on:m.matchedOn, confidence:m.confidence,
-        platform: normalizePlatformRaw((m.lead?.[lPlatform]||''),aliasMap()),
-        revenue: m.sale?.[sRevenue]||'',
-        lead_email: m.lead?.[lEmail]||'', sale_email: m.sale?.[sEmail]||'',
-        lead_phone: m.lead?.[lPhone]||'', sale_phone: m.sale?.[sPhone]||'',
-        lead_name: m.lead?.[lName]||'',   sale_name: m.sale?.[sName]||''
-      }));
-      downloadCSV('matched_leads.csv',rows);
-    });
-    document.querySelector('#btnDownloadSummary').addEventListener('click',()=>{
-      const rows=(current.platformSummary||[]).map(r=>({platform:r.platform,leads:r.leads,revenue:r.revenue.toFixed(2)}));
-      downloadCSV('platform_summary.csv',rows);
-    });
-    document.querySelector('#btnDownloadUnmatched').addEventListener('click',()=>{
-      const lEmail=$('#lEmail').value, lPhone=$('#lPhone').value, lName=$('#lName').value, lPlatform=$('#lPlatform').value;
-      const sEmail=$('#sEmail').value, sPhone=$('#sPhone').value, sName=$('#sName').value, sRevenue=$('#sRevenue').value;
-      const leadRows=(current.unmatchedLeads||[]).map(l=>({
-        lead_email:l[lEmail]||'', lead_phone:l[lPhone]||'', lead_name:l[lName]||'', platform:l[lPlatform]||''
-      }));
-      downloadCSV('unmatched_leads.csv',leadRows);
-      const saleRows=(current.unmatchedSales||[]).map(s=>({
-        sale_email:s[sEmail]||'', sale_phone:s[sPhone]||'', sale_name:s[sName]||'', revenue:s[sRevenue]||''
-      }));
-      downloadCSV('unmatched_sales.csv',saleRows);
+    const allMatches = matchRecords({
+      sales: state.sales.rows,
+      leads: state.leads.rows,
+      mapSales: { email: sEmail, phone: sPhone, name: sName },
+      mapLeads: { email: lEmail, phone: lPhone, name: lName }
     });
 
-    // ===== File/field events =====
-    document.querySelector('#salesFile').addEventListener('change',async(e)=>{
-      const f=e.target.files?.[0]; if(!f) return;
-      state.sales.file=f; state.sales.rows=await readCSV(f); state.sales.headers=Object.keys(state.sales.rows[0]||{});
-      updateMeta(); headersChanged(); compute();
+    // STRICT: show only confidence === 1 (email+phone)
+    const matches = allMatches.filter(m => m.confidence === 1);
+
+    // Unmatched based on final matches
+    const usedSales = new Set(matches.map(m => m.sale));
+    const usedLeads = new Set(matches.map(m => m.lead));
+    const unmatchedLeads = state.leads.rows.filter(l => !usedLeads.has(l));
+    const unmatchedSales = state.sales.rows.filter(s => !usedSales.has(s));
+
+    const saleKey=makeSaleKeyFactory(sEmail,sPhone,sName,sRevenue);
+    const summary=groupByPlatformSummaryDedup(matches,lPlatform,sRevenue,saleKey,normalizePlatformRaw);
+
+    // total revenue de-duped
+    const seen=new Set(); let total=0;
+    matches.forEach(m=>{
+      const k=saleKey(m.sale);
+      if(!seen.has(k)){
+        const rev=parseFloat((m.sale?.[sRevenue]??'').toString().replace(/[^0-9.\-]/g,''))||0;
+        total+=rev; seen.add(k);
+      }
     });
-    document.querySelector('#leadsFile').addEventListener('change',async(e)=>{
-      const f=e.target.files?.[0]; if(!f) return;
-      state.leads.file=f; state.leads.rows=await readCSV(f); state.leads.headers=Object.keys(state.leads.rows[0]||{});
-      updateMeta(); headersChanged(); compute();
-    });
-    ['sEmail','sPhone','sName','sRevenue','lEmail','lPhone','lName','lPlatform','aliasText'].forEach(id=>{
-      document.getElementById(id).addEventListener(id==='aliasText'?'input':'change',()=>compute());
-    });
-  </script>
+
+    current={matches,unmatchedLeads,unmatchedSales,platformSummary:summary,totalRevenue:total};
+    renderResults(current);
+  }
+
+  function renderResults({matches,platformSummary,totalRevenue}){
+    $('#matchesCount').textContent = (matches||[]).length.toLocaleString();
+    $('#platformsCount').textContent = (platformSummary||[]).length.toLocaleString();
+    $('#totalRevenue').textContent = money(totalRevenue||0);
+    $('#btnDownloadMatches').disabled = !(matches&&matches.length);
+    $('#btnDownloadSummary').disabled = !(platformSummary&&platformSummary.length);
+    $('#btnDownloadUnmatched').disabled = !(state.sales.rows.length&&state.leads.rows.length);
+
+    // Summary
+    const tb=$('#tblSummary tbody'); tb.innerHTML='';
+    if(!platformSummary||!platformSummary.length){
+      tb.innerHTML='<tr><td colspan="3" class="hint">No data yet. Upload files and map columns.</td></tr>';
+    } else {
+      platformSummary.forEach(r=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML=`<td>${r.platform}</td><td>${r.leads.toLocaleString()}</td><td>${money(r.revenue)}</td>`;
+        tb.appendChild(tr);
+      });
+    }
+
+    // Matches preview
+    const mp=$('#tblMatches tbody'); mp.innerHTML='';
+    if(!matches||!matches.length){
+      mp.innerHTML='<tr><td colspan="10" class="hint">No matches yet.</td></tr>';
+    } else {
+      const lEmail=$('#lEmail').value, lPhone=$('#lPhone').value, lName=$('#lName').value, lPlatform=$('#lPlatform').value;
+      const sEmail=$('#sEmail').value, sPhone=$('#sPhone').value, sName=$('#sName').value, sRevenue=$('#sRevenue').value;
+      matches.slice(0,200).forEach(m=>{
+        const tr=document.createElement('tr');
+        tr.innerHTML = `<td>${m.matchedOn}</td>
+          <td>${(m.confidence??'')}</td>
+          <td>${normalizePlatformRaw((m.lead?.[lPlatform]||''),aliasMap())}</td>
+          <td>${(m.sale?.[sRevenue]??'')}</td>
+          <td>${(m.lead?.[lEmail]??'')}</td>
+          <td>${(m.sale?.[sEmail]??'')}</td>
+          <td>${(m.lead?.[lPhone]??'')}</td>
+          <td>${(m.sale?.[sPhone]??'')}</td>
+          <td>${(m.lead?.[lName]??'')}</td>
+          <td>${(m.sale?.[sName]??'')}</td>`;
+        mp.appendChild(tr);
+      });
+    }
+  }
+
+  // ===== Downloads =====
+  document.querySelector('#btnDownloadMatches').addEventListener('click',()=>{
+    const lEmail=$('#lEmail').value, lPhone=$('#lPhone').value, lName=$('#lName').value, lPlatform=$('#lPlatform').value;
+    const sEmail=$('#sEmail').value, sPhone=$('#sPhone').value, sName=$('#sName').value, sRevenue=$('#sRevenue').value;
+    const rows=(current.matches||[]).map(m=>({
+      matched_on:m.matchedOn, confidence:m.confidence,
+      platform: normalizePlatformRaw((m.lead?.[lPlatform]||''),aliasMap()),
+      revenue: m.sale?.[sRevenue]||'',
+      lead_email: m.lead?.[lEmail]||'', sale_email: m.sale?.[sEmail]||'',
+      lead_phone: m.lead?.[lPhone]||'', sale_phone: m.sale?.[sPhone]||'',
+      lead_name: m.lead?.[lName]||'',   sale_name: m.sale?.[sName]||''
+    }));
+    downloadCSV('matched_leads.csv',rows);
+  });
+  document.querySelector('#btnDownloadSummary').addEventListener('click',()=>{
+    const rows=(current.platformSummary||[]).map(r=>({platform:r.platform,leads:r.leads,revenue:r.revenue.toFixed(2)}));
+    downloadCSV('platform_summary.csv',rows);
+  });
+  document.querySelector('#btnDownloadUnmatched').addEventListener('click',()=>{
+    const lEmail=$('#lEmail').value, lPhone=$('#lPhone').value, lName=$('#lName').value, lPlatform=$('#lPlatform').value;
+    const sEmail=$('#sEmail').value, sPhone=$('#sPhone').value, sName=$('#sName').value, sRevenue=$('#sRevenue').value;
+    const leadRows=(current.unmatchedLeads||[]).map(l=>({
+      lead_email:l[lEmail]||'', lead_phone:l[lPhone]||'', lead_name:l[lName]||'', platform:l[lPlatform]||''
+    }));
+    downloadCSV('unmatched_leads.csv',leadRows);
+    const saleRows=(current.unmatchedSales||[]).map(s=>({
+      sale_email:s[sEmail]||'', sale_phone:s[sPhone]||'', sale_name:s[sName]||'', revenue:s[sRevenue]||''
+    }));
+    downloadCSV('unmatched_sales.csv',saleRows);
+  });
+
+  // ===== File/field events + auto-map =====
+  document.querySelector('#salesFile').addEventListener('change',async(e)=>{
+    const f=e.target.files?.[0]; if(!f) return;
+    state.sales.file=f; state.sales.rows=await readCSV(f);
+    state.sales.headers=Object.keys(state.sales.rows[0]||{}).map(x=>x.trim());
+    headersChanged(); autoMapSales(); updateMeta(); compute();
+  });
+  document.querySelector('#leadsFile').addEventListener('change',async(e)=>{
+    const f=e.target.files?.[0]; if(!f) return;
+    state.leads.file=f; state.leads.rows=await readCSV(f);
+    state.leads.headers=Object.keys(state.leads.rows[0]||{}).map(x=>x.trim());
+    headersChanged(); autoMapLeads(); updateMeta(); compute();
+  });
+
+  ['sEmail','sPhone','sName','sRevenue','lEmail','lPhone','lName','lPlatform','aliasText'].forEach(id=>{
+    document.getElementById(id).addEventListener(id==='aliasText'?'input':'change',()=>compute());
+  });
+</script>
 </body>
 </html>
