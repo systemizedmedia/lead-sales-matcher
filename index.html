@@ -3,20 +3,17 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Lead ⇄ Sales Matcher</title>
-  <meta name="theme-color" content="#111827" />
-  <link rel="manifest" href="manifest.webmanifest" />
+  <title>Lead ⇄ Sales Matcher (Single File)</title>
   <!-- Tailwind (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="min-h-screen bg-gray-50 text-gray-900">
-  <div id="root"></div>
-
   <!-- React 18 + ReactDOM (CDN) -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <!-- Babel so we can write JSX in this single file -->
+  <!-- Babel for JSX in this one-file build -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="min-h-screen bg-gray-50 text-gray-900">
+  <div id="root"></div>
 
   <script type="text/babel">
     const { useMemo, useState } = React;
@@ -57,22 +54,26 @@
     const normalizePhone = (p) => (p || '').toString().replace(/\D+/g, '').replace(/^1(\d{10})$/, '$1');
     const normalizeName  = (n) => (n || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
 
-    // robust token check: matches 'yt', 'fb', 'tt' as separate tokens (not inside words like "loyalty")
+    // Token boundary helper (avoids "loyalty" => YT)
     const tokenRegex = (t) => new RegExp(`(^|[^a-z])${t}([^a-z]|$)`, 'i');
 
-    function canonicalizePlatform(raw, aliasMap) {
+    // Platforms: YT→Youtube, FB→Facebook, TT→Tiktok; else keep raw as-is (or "Unknown" if empty)
+    function canonicalizePlatform(raw) {
       const s = (raw || '').toString().trim();
-      const lower = s.toLowerCase();
-
-      // Loose contains for the common short-hands (non-exact)
-      if (/you\s*tube/i.test(s) || tokenRegex('yt').test(s)) return 'YouTube';
+      if (!s) return 'Unknown';
+      if (/you\s*tube/i.test(s) || tokenRegex('yt').test(s)) return 'Youtube';
       if (/face\s*book/i.test(s) || tokenRegex('fb').test(s)) return 'Facebook';
-      if (/tik\s*tok/i.test(s) || tokenRegex('tt').test(s)) return 'TikTok';
+      if (/tik\s*tok/i.test(s) || tokenRegex('tt').test(s)) return 'Tiktok';
+      return s; // keep as-is if not matched
+    }
 
-      // Exact alias fallbacks (user-editable)
-      if (aliasMap && aliasMap.has(lower)) return aliasMap.get(lower);
-
-      return s || 'Unknown';
+    // Offers: FQ→Free Quote, TUP→Tune Up; else keep raw as-is (or "Unknown" if empty)
+    function canonicalizeOffer(raw) {
+      const s = (raw || '').toString().trim();
+      if (!s) return 'Unknown';
+      if (/free\s*quote/i.test(s) || tokenRegex('fq').test(s)) return 'Free Quote';
+      if (/tune\s*up/i.test(s)    || tokenRegex('tup').test(s)) return 'Tune Up';
+      return s; // keep as-is if not matched
     }
 
     // ===== Utils =====
@@ -94,8 +95,10 @@
       document.body.removeChild(a); URL.revokeObjectURL(url);
     }
 
-    // ===== Matching =====
-    function matchRecords({ sales, leads, mapSales, mapLeads }) {
+    // ===== Matching (strict) =====
+    // 1) email+phone must match the SAME sale record -> match
+    // 2) OR name matches AND (email OR phone) matches the SAME sale record -> match
+    function matchRecordsStrict({ sales, leads, mapSales, mapLeads }) {
       const emailIdx = new Map(), phoneIdx = new Map(), nameIdx = new Map();
       const sEmail = mapSales.email, sPhone = mapSales.phone, sName = mapSales.name;
 
@@ -103,9 +106,9 @@
         const e = normalizeEmail(s[sEmail]);
         const p = normalizePhone(s[sPhone]);
         const n = normalizeName(s[sName]);
-        if (e) emailIdx.set(e, s);
-        if (p) phoneIdx.set(p, s);
-        if (n) nameIdx.set(n, s);
+        if (e && !emailIdx.has(e)) emailIdx.set(e, s);
+        if (p && !phoneIdx.has(p)) phoneIdx.set(p, s);
+        if (n && !nameIdx.has(n))  nameIdx.set(n, s);
       });
 
       const lEmail = mapLeads.email, lPhone = mapLeads.phone, lName = mapLeads.name;
@@ -116,19 +119,26 @@
         const lp = normalizePhone(lead[lPhone]);
         const ln = normalizeName(lead[lName]);
 
-        let sale = null; const matchedOn = [];
-        if (!sale && le && emailIdx.has(le)) { sale = emailIdx.get(le); matchedOn.push('email'); }
-        if (!sale && lp && phoneIdx.has(lp)) { sale = phoneIdx.get(lp); matchedOn.push('phone'); }
-        if (!sale && ln && nameIdx.has(ln))  { sale = nameIdx.get(ln); matchedOn.push('name'); }
+        const sByEmail = le ? emailIdx.get(le) : null;
+        const sByPhone = lp ? phoneIdx.get(lp) : null;
+        const sByName  = ln ? nameIdx.get(ln)  : null;
 
-        if (sale) matches.push({ lead, sale, matchedOn: matchedOn.join('|') });
+        if (sByEmail && sByPhone && sByEmail === sByPhone) {
+          matches.push({ lead, sale: sByEmail, matchedOn: 'email+phone' });
+          return;
+        }
+        if (sByName && (sByName === sByEmail || sByName === sByPhone)) {
+          const tag = sByName === sByEmail ? 'name+email' : 'name+phone';
+          matches.push({ lead, sale: sByName, matchedOn: tag });
+          return;
+        }
       });
 
       return matches;
     }
 
     // ===== De-dup helpers =====
-    // Unique sale key from (email, phone, name, revenue) so the same sale is counted once.
+    // Unique sale key: (email, phone, name, revenue) => count each sale once
     function makeSaleKeyFactory(sEmail, sPhone, sName, sRevenue) {
       return function saleKey(saleObj) {
         const e = normalizeEmail(saleObj?.[sEmail]);
@@ -139,7 +149,7 @@
       };
     }
 
-    // Unique lead key from (email, phone, name) to collapse duplicate lead rows (platform disagreement -> keep first)
+    // Unique lead key: (email, phone, name) => drop duplicate lead rows (keep first occurrence)
     function makeLeadKeyFactory(lEmail, lPhone, lName) {
       return function leadKey(leadObj) {
         const e = normalizeEmail(leadObj?.[lEmail]);
@@ -149,18 +159,18 @@
       };
     }
 
-    // Platform summary with **de-duplicated revenue** and **de-duplicated lead rows**
-    function groupByPlatformSummaryDedup(matches, platformKey, revenueKey, saleKeyFn, normalizer) {
+    // Generic group-by (platform/offers): revenue de-duped by sale; rows already de-duped by lead
+    function groupByFieldSummary(matches, fieldKey, revenueKey, saleKeyFn, normalizer) {
       const map = new Map();
       const seenSales = new Set();
       matches.forEach(m => {
-        const raw = (m.lead?.[platformKey] ?? '').toString();
-        const platform = (normalizer ? normalizer(raw) : raw) || 'Unknown';
+        const raw = (m.lead?.[fieldKey] ?? '').toString();
+        const label = (normalizer ? normalizer(raw) : raw) || 'Unknown';
         const revenueRaw = m.sale?.[revenueKey];
         const revenue = parseFloat((revenueRaw ?? '').toString().replace(/[^0-9.\-]/g, '')) || 0;
 
-        if (!map.has(platform)) map.set(platform, { platform, leads: 0, revenue: 0 });
-        const obj = map.get(platform);
+        if (!map.has(label)) map.set(label, { label, leads: 0, revenue: 0 });
+        const obj = map.get(label);
         obj.leads += 1;
 
         const k = saleKeyFn(m.sale);
@@ -186,32 +196,15 @@
       const [lPhone, setLPhone] = useState("");
       const [lName, setLName] = useState("");
       const [lPlatform, setLPlatform] = useState("");
-
-      // Platform aliases (editable)
-      const defaultAliasText = `Facebook: fb, facebook
-TikTok: tt, tiktok
-YouTube: yt, youtube`;
-      const [aliasText, setAliasText] = useState(defaultAliasText);
-      const aliasMap = useMemo(() => {
-        const map = new Map();
-        aliasText.split(/\n+/).forEach(line => {
-          const parts = line.split(':');
-          if (parts.length < 2) return;
-          const canonical = parts[0].trim();
-          const aliases = parts[1].split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
-          if (canonical) map.set(canonical.toLowerCase(), canonical);
-          aliases.forEach(a => map.set(a, canonical));
-        });
-        return map;
-      }, [aliasText]);
+      const [lOffer, setLOffer] = useState(""); // NEW
 
       const ready = salesFile && leadsFile && sRevenue && lPlatform &&
         (sEmail || sPhone || sName) && (lEmail || lPhone || lName);
 
-      // Raw matches (email/phone/name any-of)
+      // Strict matches
       const rawMatches = useMemo(() => {
         if (!ready) return [];
-        return matchRecords({
+        return matchRecordsStrict({
           sales: salesFile.data,
           leads: leadsFile.data,
           mapSales: { email: sEmail, phone: sPhone, name: sName },
@@ -219,7 +212,7 @@ YouTube: yt, youtube`;
         });
       }, [ready, salesFile, leadsFile, sEmail, sPhone, sName, lEmail, lPhone, lName]);
 
-      // Deduplicate by lead identity, keeping FIRST row encountered
+      // Deduplicate by lead identity (keep first occurrence)
       const matches = useMemo(() => {
         if (!ready) return [];
         const seen = new Set();
@@ -232,17 +225,22 @@ YouTube: yt, youtube`;
         return out;
       }, [ready, rawMatches, lEmail, lPhone, lName]);
 
-      // sale-key builder for dedup
+      // sale-key for revenue de-dup
       const saleKey = useMemo(() => makeSaleKeyFactory(sEmail, sPhone, sName, sRevenue), [sEmail, sPhone, sName, sRevenue]);
 
-      // De-duped platform summary (uses canonicalizePlatform for YT/FB/TT)
+      // Platform summary
       const platformSummary = useMemo(() => {
         if (!ready) return [];
-        const normalizer = (raw) => canonicalizePlatform(raw, aliasMap);
-        return groupByPlatformSummaryDedup(matches, lPlatform, sRevenue, saleKey, normalizer);
-      }, [matches, ready, lPlatform, sRevenue, aliasMap, saleKey]);
+        return groupByFieldSummary(matches, lPlatform, sRevenue, saleKey, canonicalizePlatform);
+      }, [matches, ready, lPlatform, sRevenue, saleKey]);
 
-      // De-duped overall total revenue (by unique sale)
+      // Offer summary (optional; only if offer column is selected)
+      const offerSummary = useMemo(() => {
+        if (!ready || !lOffer) return [];
+        return groupByFieldSummary(matches, lOffer, sRevenue, saleKey, canonicalizeOffer);
+      }, [matches, ready, lOffer, sRevenue, saleKey]);
+
+      // De-duped overall revenue (unique sales)
       const totalRevenue = useMemo(() => {
         const seen = new Set();
         let sum = 0;
@@ -260,32 +258,44 @@ YouTube: yt, youtube`;
       const downloadMatches = () => {
         const rows = matches.map(m => ({
           matched_on: m.matchedOn,
-          platform: canonicalizePlatform((m.lead?.[lPlatform] ?? '').toString(), aliasMap),
+          platform: canonicalizePlatform((m.lead?.[lPlatform] ?? '').toString()),
+          offer: lOffer ? canonicalizeOffer((m.lead?.[lOffer] ?? '').toString()) : '',
           revenue: m.sale?.[sRevenue] ?? '',
           lead_email: m.lead?.[lEmail] ?? '',
           sale_email: m.sale?.[sEmail] ?? '',
           lead_phone: m.lead?.[lPhone] ?? '',
           sale_phone: m.sale?.[sPhone] ?? '',
           lead_name: m.lead?.[lName] ?? '',
-          sale_name: m.sale?.[sName] ?? '',
+          sale_name: m.sale?.[sName] ?? ''
         }));
         downloadCSV('matched_leads.csv', rows);
       };
 
       const downloadPlatformSummary = () => {
         const rows = platformSummary.map(r => ({
-          platform: r.platform,
+          platform: r.label,
           leads: r.leads,
           revenue: r.revenue.toFixed(2)
         }));
         downloadCSV('platform_summary.csv', rows);
       };
 
+      const downloadOfferSummary = () => {
+        const rows = offerSummary.map(r => ({
+          offer: r.label,
+          leads: r.leads,
+          revenue: r.revenue.toFixed(2)
+        }));
+        downloadCSV('offer_summary.csv', rows);
+      };
+
       return (
         <div className="max-w-6xl mx-auto p-6">
           <header className="mb-6">
             <h1 className="text-2xl md:text-3xl font-bold">Lead ⇄ Sales Matcher</h1>
-            <p className="text-sm text-gray-600 mt-1">Sales DB ↔ Lead DB (platform attribution & revenue). All in-browser, works offline after first load.</p>
+            <p className="text-sm text-gray-600 mt-1">
+              Strict matching • De-duped by lead & sale • Platform & Offer summaries
+            </p>
           </header>
 
           <div className="grid md:grid-cols-2 gap-6 mb-6">
@@ -298,10 +308,10 @@ YouTube: yt, youtube`;
                 </div>
               )}
               <div className="mt-4 grid grid-cols-2 gap-3">
-                <Select label="Sales: Email"   value={sEmail}    onChange={setSEmail}  options={salesHeaders} />
-                <Select label="Sales: Phone"   value={sPhone}    onChange={setSPhone}  options={salesHeaders} />
-                <Select label="Sales: Name"    value={sName}     onChange={setSName}   options={salesHeaders} />
-                <Select label="Sales: Revenue $" value={sRevenue} onChange={setSRevenue} options={salesHeaders} />
+                <Select label="Sales: Email"     value={sEmail}    onChange={setSEmail}  options={salesHeaders} />
+                <Select label="Sales: Phone"     value={sPhone}    onChange={setSPhone}  options={salesHeaders} />
+                <Select label="Sales: Name"      value={sName}     onChange={setSName}   options={salesHeaders} />
+                <Select label="Sales: Revenue $" value={sRevenue}  onChange={setSRevenue} options={salesHeaders} />
               </div>
             </div>
 
@@ -314,31 +324,20 @@ YouTube: yt, youtube`;
                 </div>
               )}
               <div className="mt-4 grid grid-cols-2 gap-3">
-                <Select label="Leads: Email"   value={lEmail}     onChange={setLEmail}    options={leadsHeaders} />
-                <Select label="Leads: Phone"   value={lPhone}     onChange={setLPhone}    options={leadsHeaders} />
-                <Select label="Leads: Name"    value={lName}      onChange={setLName}     options={leadsHeaders} />
-                <Select label="Leads: Platform" value={lPlatform} onChange={setLPlatform} options={leadsHeaders} />
+                <Select label="Leads: Email"     value={lEmail}     onChange={setLEmail}    options={leadsHeaders} />
+                <Select label="Leads: Phone"     value={lPhone}     onChange={setLPhone}    options={leadsHeaders} />
+                <Select label="Leads: Name"      value={lName}      onChange={setLName}     options={leadsHeaders} />
+                <Select label="Leads: Platform"  value={lPlatform}  onChange={setLPlatform} options={leadsHeaders} />
+                <Select label="Leads: Offer (optional)" value={lOffer} onChange={setLOffer} options={['', ...leadsHeaders]} />
               </div>
             </div>
-          </div>
-
-          <div className="rounded-2xl border p-4 bg-white mb-6">
-            <h2 className="font-semibold mb-2">3) Platform Aliases (optional)</h2>
-            <p className="text-xs text-gray-600 mb-2">
-              Loose matching is automatic for <strong>FB / TT / YT</strong>. Add extra aliases here if you want (e.g., <code>Google: gads, google ads</code>).
-            </p>
-            <textarea
-              value={aliasText}
-              onChange={(e) => setAliasText(e.target.value)}
-              className="w-full rounded-xl border p-3 text-sm font-mono min-h-[110px]"
-            />
           </div>
 
           <div className="flex flex-wrap gap-4 mb-6">
             <SummaryCard title="Files" value={(salesFile ? 1 : 0) + (leadsFile ? 1 : 0) + "/2"} sub="Uploads ready" />
             <SummaryCard title="Matches" value={matches.length.toLocaleString()} sub="Lead ↔︎ Sale pairs (de-duped by lead)" />
             <SummaryCard title="Platforms" value={platformSummary.length.toLocaleString()} sub="With at least one match" />
-            <SummaryCard title="Revenue (All)" value={`$${totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} sub="De-duped: each sale counted once" />
+            <SummaryCard title="Revenue (All)" value={`$${totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} sub="De-duped sales" />
           </div>
 
           <div className="mb-4 flex gap-3">
@@ -356,12 +355,19 @@ YouTube: yt, youtube`;
             >
               Download Platform Summary CSV
             </button>
+            <button
+              disabled={!ready || !lOffer || offerSummary.length === 0}
+              onClick={downloadOfferSummary}
+              className={`px-4 py-2 rounded-xl text-sm font-medium shadow-sm ${(!ready || !lOffer || offerSummary.length===0) ? 'bg-gray-200 text-gray-500' : 'bg-black text-white'}`}
+            >
+              Download Offer Summary CSV
+            </button>
           </div>
 
           <div className="rounded-2xl border bg-white">
             <div className="p-4 border-b flex items-center justify-between">
               <h3 className="font-semibold">Platform Summary</h3>
-              <div className="text-xs text-gray-500">Grouped by lead platform with revenue sum (de-duped by sale & lead)</div>
+              <div className="text-xs text-gray-500">Grouped by platform (Youtube, Facebook, Tiktok; others kept “as is”); revenue de-duped by sale</div>
             </div>
             <div className="p-4 overflow-x-auto">
               <table className="min-w-full text-sm">
@@ -375,7 +381,7 @@ YouTube: yt, youtube`;
                 <tbody>
                   {platformSummary.map((r, idx) => (
                     <tr key={idx} className="border-t">
-                      <td className="px-3 py-2">{r.platform}</td>
+                      <td className="px-3 py-2">{r.label}</td>
                       <td className="px-3 py-2">{r.leads.toLocaleString()}</td>
                       <td className="px-3 py-2">${r.revenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
                     </tr>
@@ -390,8 +396,38 @@ YouTube: yt, youtube`;
 
           <div className="rounded-2xl border bg-white mt-6">
             <div className="p-4 border-b flex items-center justify-between">
+              <h3 className="font-semibold">Offer Summary</h3>
+              <div className="text-xs text-gray-500">FQ→Free Quote; TUP→Tune Up; others kept “as is”</div>
+            </div>
+            <div className="p-4 overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-600">
+                    <th className="px-3 py-2">Offer</th>
+                    <th className="px-3 py-2">Matched Leads</th>
+                    <th className="px-3 py-2">Revenue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {lOffer && offerSummary.map((r, idx) => (
+                    <tr key={idx} className="border-t">
+                      <td className="px-3 py-2">{r.label}</td>
+                      <td className="px-3 py-2">{r.leads.toLocaleString()}</td>
+                      <td className="px-3 py-2">${r.revenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                    </tr>
+                  ))}
+                  {(!lOffer || offerSummary.length === 0) && (
+                    <tr><td className="px-3 py-6 text-gray-500" colSpan={3}>Select your Offer column to see this summary.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="rounded-2xl border bg-white mt-6">
+            <div className="p-4 border-b flex items-center justify-between">
               <h3 className="font-semibold">Matched Rows (Preview)</h3>
-              <div className="text-xs text-gray-500">First 200 (de-duped by lead; platform from first occurrence)</div>
+              <div className="text-xs text-gray-500">First 200 (de-duped by lead; platform/offer taken from first occurrence)</div>
             </div>
             <div className="p-4 overflow-x-auto">
               <table className="min-w-full text-sm">
@@ -399,6 +435,7 @@ YouTube: yt, youtube`;
                   <tr className="text-left text-gray-600">
                     <th className="px-3 py-2">Matched On</th>
                     <th className="px-3 py-2">Platform</th>
+                    <th className="px-3 py-2">Offer</th>
                     <th className="px-3 py-2">Revenue</th>
                     <th className="px-3 py-2">Lead Email</th>
                     <th className="px-3 py-2">Sale Email</th>
@@ -412,7 +449,8 @@ YouTube: yt, youtube`;
                   {matches.slice(0,200).map((m, idx) => (
                     <tr key={idx} className="border-t">
                       <td className="px-3 py-2">{m.matchedOn}</td>
-                      <td className="px-3 py-2">{canonicalizePlatform((m.lead?.[lPlatform] ?? '').toString(), aliasMap)}</td>
+                      <td className="px-3 py-2">{canonicalizePlatform((m.lead?.[lPlatform] ?? '').toString())}</td>
+                      <td className="px-3 py-2">{lOffer ? canonicalizeOffer((m.lead?.[lOffer] ?? '').toString()) : ''}</td>
                       <td className="px-3 py-2">{(m.sale?.[sRevenue] ?? '').toString()}</td>
                       <td className="px-3 py-2">{(m.lead?.[lEmail] ?? '').toString()}</td>
                       <td className="px-3 py-2">{(m.sale?.[sEmail] ?? '').toString()}</td>
@@ -423,7 +461,7 @@ YouTube: yt, youtube`;
                     </tr>
                   ))}
                   {matches.length === 0 && (
-                    <tr><td className="px-3 py-6 text-gray-500" colSpan={9}>No matches yet.</td></tr>
+                    <tr><td className="px-3 py-6 text-gray-500" colSpan={10}>No matches yet.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -431,8 +469,8 @@ YouTube: yt, youtube`;
           </div>
 
           <footer className="text-xs text-gray-500 mt-8">
-            <p>Tips: Ensure both CSVs include at least one of Email, Phone, or Name. Revenue should be numeric (e.g., 1250 or $1,250.00). Platform comes from your Lead DB.</p>
-            <p className="mt-2">Privacy: All processing happens in your browser. No data is uploaded to any server.</p>
+            <p>Tips: Pick your Platform and (optional) Offer columns from the Lead CSV. Revenue should be numeric (e.g., 1250 or $1,250.00).</p>
+            <p className="mt-2">Privacy: Everything runs in your browser. No uploads.</p>
           </footer>
         </div>
       );
@@ -459,11 +497,12 @@ YouTube: yt, youtube`;
 
     function Select({ label, value, onChange, options }) {
       return (
-        <div className="flex flex-col gap-1 min-w-[180px]">
+        <div className="flex flex-col gap-1 min-w-[200px]">
           <label className="text-xs text-gray-600">{label}</label>
           <select value={value} onChange={(e) => onChange(e.target.value)} className="rounded-xl border px-3 py-2 text-sm">
-            <option value="">— Select —</option>
-            {options.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            {options.map(opt =>
+              <option key={opt} value={opt}>{opt === '' ? '— Select —' : opt}</option>
+            )}
           </select>
         </div>
       );
@@ -479,15 +518,7 @@ YouTube: yt, youtube`;
       );
     }
 
-    const root = ReactDOM.createRoot(document.getElementById('root'));
-    root.render(<App />);
-
-    // ===== PWA: Service Worker Registration =====
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js').catch(console.error);
-      });
-    }
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
   </script>
 </body>
 </html>
