@@ -175,7 +175,18 @@ YouTube: yt, youtube</textarea>
     function normalizeEmail(e){const raw=firstItem(e).toLowerCase();if(!raw) return '';const parts=raw.split('@');if(parts.length<2) return raw;const local=parts[0],domain=parts[1];if(domain==='gmail.com'){return local.replace(/\./g,'')+'@'+domain}return local+'@'+domain}
     function normalizePhone(p){return (p||'').toString().replace(/\D+/g,'').replace(/^1(\d{10})$/,'$1')}
     function normalizeName(n){return (n||'').toString().trim().toLowerCase().replace(/\s+/g,' ')}
-    function normalizePlatformRaw(p, aliasMap){const raw=(p||'').toString().trim();const key=raw.toLowerCase();if(aliasMap&&aliasMap.has(key)) return aliasMap.get(key);return raw||'Unknown'}
+    function normalizePlatformRaw(p, aliasMap){
+  const raw = (p||'').toString().trim();
+  const key = raw.toLowerCase();
+  if (!key) return 'Unknown';
+  // Substring/keyword grouping (case-insensitive)
+  if (/facebook|fb/i.test(raw)) return 'Facebook';
+  if (/youtube|yt/i.test(raw)) return 'YouTube';
+  if (/tiktok|tt/i.test(raw)) return 'TikTok';
+  // Exact alias map fallback
+  if (aliasMap && aliasMap.has(key)) return aliasMap.get(key);
+  return raw;
+}
 
     // ===== Similarity (Jaro/Winkler) =====
     function jaro(a,b){if(!a||!b) return 0;if(a===b) return 1;const mw=Math.floor(Math.max(a.length,b.length)/2)-1;const aM=new Array(a.length).fill(false),bM=new Array(b.length).fill(false);let m=0;for(let i=0;i<a.length;i++){const start=Math.max(0,i-mw),end=Math.min(i+mw+1,b.length);for(let j=start;j<end;j++){if(bM[j]) continue;if(a[i]!==b[j]) continue;aM[i]=true;bM[j]=true;m++;break}} if(m===0) return 0;let t=0,k=0;for(let i=0;i<a.length;i++){if(!aM[i]) continue;while(!bM[k]) k++;if(a[i]!==b[k]) t++;k++}return (m/a.length + m/b.length + (m - t/2)/m)/3}
@@ -204,7 +215,7 @@ YouTube: yt, youtube</textarea>
         let sale=null,matchedOn=[],confidence=0;
         if(!sale && le && emailIdx.has(le)){sale=emailIdx.get(le);matchedOn.push('email');confidence=1}
         if(!sale && lp && phoneIdx.has(lp)){sale=phoneIdx.get(lp);matchedOn.push('phone');confidence=1}
-        if(!sale && ln && nameIdx.has(ln)){sale=nameIdx.get(ln);matchedOn.push('name');confidence=0.98}
+        if(!sale && ln && nameIdx.has(ln)){sale=nameIdx.get(ln);matchedOn.push('name');confidence=1}
         if(!sale && options.enableFuzzy && ln){let best={s:null,score:0};nameIdx.forEach((sObj,nameKey)=>{const sc=jaroWinkler(ln,nameKey);if(sc>best.score) best={s:sObj,score:sc}}); if(best.score>=(options.nameThreshold||0.9)){sale=best.s;matchedOn.push('name_fuzzy');confidence=+best.score.toFixed(3)}}
         if(sale){matches.push({lead,sale,matchedOn:matchedOn.join('|'),confidence})} else {unmatchedLeads.push(lead)}
       });
