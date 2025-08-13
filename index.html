@@ -3,13 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Lead ⇄ Sales Matcher (Auto-Mapping)</title>
-  <!-- Tailwind (CDN) -->
+  <title>Lead ⇄ Sales Matcher (Auto-Mapping + Strong Name Match)</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- React 18 + ReactDOM (CDN) -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-  <!-- Babel for JSX in this one-file build -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body class="min-h-screen bg-gray-50 text-gray-900">
@@ -52,7 +49,24 @@
     // ===== Normalizers =====
     const normalizeEmail = (e) => (e || '').toString().trim().toLowerCase();
     const normalizePhone = (p) => (p || '').toString().replace(/\D+/g, '').replace(/^1(\d{10})$/, '$1');
-    const normalizeName  = (n) => (n || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
+
+    // Robust, order-insensitive name key:
+    // - lowercases
+    // - removes accents
+    // - strips punctuation
+    // - drops titles (mr, mrs, ms, dr) and suffixes (jr, sr, ii/iii/iv)
+    // - removes 1-char middle initials
+    // - sorts tokens so "Doe, John" == "John Doe"
+    function nameKey(raw) {
+      if (!raw) return '';
+      let s = raw.toString().normalize('NFD').replace(/[\u0300-\u036f]/g,''); // strip accents
+      s = s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); // keep alnum & spaces
+      const stop = new Set(['mr','mrs','ms','dr','jr','sr','ii','iii','iv','rev','prof']);
+      const tokens = s.split(/\s+/)
+        .filter(t => t && !stop.has(t) && t.length > 1); // drop 1-char initials
+      return tokens.sort().join(' ');
+    }
+    function namesEqual(a, b) { return !!a && !!b && nameKey(a) === nameKey(b); }
 
     // Token boundary helper (avoids "loyalty" => YT)
     const tokenRegex = (t) => new RegExp(`(^|[^a-z])${t}([^a-z]|$)`, 'i');
@@ -125,7 +139,7 @@
       const lower = headers.map(h => h.toLowerCase());
       const fi = lower.findIndex(h => h.includes('first') && h.includes('name'));
       const li = lower.findIndex(h => h.includes('last')  && h.includes('name'));
-      const hasFull = lower.findIndex(h => includesAny(h, ['full name','name'])) !== -1;
+      const hasFull = lower.findIndex(h => includesAny(h, ['full name','fullname','name'])) !== -1;
       if (fi !== -1 && li !== -1 && !hasFull) {
         const newHeader = 'FullName (computed)';
         fileObj.headers = [...fileObj.headers, newHeader];
@@ -152,12 +166,11 @@
     }
     function guessName(headers) {
       const low = headers.map(h => (h||'').toString().toLowerCase());
-      const exact = ['name','full name','lead name','customer name','contact name'];
+      const exact = ['name','full name','fullname','lead name','customer name','contact name'];
       for (const t of exact) {
         const idx = low.findIndex(h => h === t || h.includes(t));
         if (idx !== -1) return headers[idx];
       }
-      // fallback to computed if present
       const compIdx = low.findIndex(h => h.includes('fullname (computed)'));
       if (compIdx !== -1) return headers[compIdx];
       return '';
@@ -181,7 +194,6 @@
         const idx = low.findIndex(h => h.includes(s));
         if (idx !== -1) return headers[idx];
       }
-      // ok-ish fallbacks if teams name things by ad objects
       const fallback = ['campaign','ad set','adset','ad name','campaign name','form name'];
       for (const f of fallback) {
         const idx = low.findIndex(h => h.includes(f));
@@ -215,7 +227,8 @@
       leads.forEach(lead => {
         const le = normalizeEmail(lead?.[lEmail]);
         const lp = normalizePhone(lead?.[lPhone]);
-        const ln = lName ? normalizeName(lead?.[lName]) : '';
+        const lnRaw = lead?.[lName];
+        const lnKey = nameKey(lnRaw);
 
         const eCands = le ? (emailIdx.get(le) || []) : [];
         const pCands = lp ? (phoneIdx.get(lp) || []) : [];
@@ -225,16 +238,18 @@
         const candSet = new Set([ ...eCands, ...pCands ]);
         const cands = Array.from(candSet);
 
+        // Prefer sale with name match (order/format invariant)
         let chosen = null;
-        if (sName && lName && ln) {
-          chosen = cands.find(sale => normalizeName(sale?.[sName]) === ln) || null;
+        if (sName && lName && lnKey) {
+          chosen = cands.find(sale => namesEqual(sale?.[sName], lnRaw)) || null;
         }
         if (!chosen) chosen = cands[0];
 
+        // Which fields matched?
         const matchedFields = [];
         if (le && eCands.includes(chosen)) matchedFields.push('email');
         if (lp && pCands.includes(chosen)) matchedFields.push('phone');
-        if (sName && lName && ln && normalizeName(chosen?.[sName]) === ln) matchedFields.push('name');
+        if (sName && lName && namesEqual(chosen?.[sName], lnRaw)) matchedFields.push('name');
 
         matches.push({ lead, sale: chosen, matchedOn: matchedFields.join('|') });
       });
@@ -242,12 +257,12 @@
       return matches;
     }
 
-    // ===== De-dup helpers =====
+    // ===== De-dup helpers (use nameKey for stability) =====
     function makeSaleKeyFactory(sEmail, sPhone, sName, sRevenue) {
       return function saleKey(saleObj) {
         const e = normalizeEmail(saleObj?.[sEmail]);
         const p = normalizePhone(saleObj?.[sPhone]);
-        const n = normalizeName(saleObj?.[sName]);
+        const n = nameKey(saleObj?.[sName]);
         const rev = (saleObj?.[sRevenue] ?? '').toString().replace(/[^0-9.\-]/g, '');
         return JSON.stringify([e, p, n, rev]);
       };
@@ -257,7 +272,7 @@
       return function leadKey(leadObj) {
         const e = normalizeEmail(leadObj?.[lEmail]);
         const p = normalizePhone(leadObj?.[lPhone]);
-        const n = normalizeName(leadObj?.[lName]);
+        const n = nameKey(leadObj?.[lName]);
         return JSON.stringify([e, p, n]);
       };
     }
@@ -303,7 +318,6 @@
       // Auto-map on file load (Sales)
       useEffect(() => {
         if (!salesFile) return;
-        // only set if blank, so users can override
         if (!sEmail)   setSEmail(guessEmail(salesFile.headers));
         if (!sPhone)   setSPhone(guessPhone(salesFile.headers));
         if (!sName)    setSName(guessName(salesFile.headers));
@@ -374,7 +388,7 @@
 
       const downloadMatches = () => {
         const rows = matches.map(m => ({
-          matched_on: m.matchedOn,
+          matched_on: m.matchedOn,                  // includes 'name' when equal
           platform_offer: platformOfferLabel((m.lead?.[lPlatform] ?? '').toString()),
           revenue: m.sale?.[sRevenue] ?? '',
           lead_email: m.lead?.[lEmail] ?? '',
@@ -401,7 +415,7 @@
           <header className="mb-6">
             <h1 className="text-2xl md:text-3xl font-bold">Lead ⇄ Sales Matcher</h1>
             <p className="text-sm text-gray-600 mt-1">
-              Auto-maps common columns • Match when <strong>email OR phone</strong> matches • <strong>Name</strong> disambiguates and appears in <em>matched_on</em> • De-duped by lead & sale • Platform names include Offer
+              Auto-maps common columns • Match when <strong>email OR phone</strong> matches • <strong>Name</strong> disambiguates (order/format insensitive) and appears in <em>matched_on</em> • De-duped by lead & sale • Platform names include Offer
             </p>
           </header>
 
@@ -440,7 +454,7 @@
           </div>
 
           <div className="mb-2 text-xs text-gray-500">
-            Tip: Auto-mapping runs once after each file loads. You can override any dropdown.
+            Tip: If names still don’t flag, confirm the **Sales: Name** and **Leads: Name** mappings point to the right columns (or use the computed FullName).
           </div>
 
           <div className="flex flex-wrap gap-4 mb-6">
@@ -540,7 +554,7 @@
           </div>
 
           <footer className="text-xs text-gray-500 mt-8">
-            <p>Rules: A lead matches a sale if <strong>email OR phone</strong> matches. <strong>Name</strong> is used to break ties and appears in <em>matched_on</em> when equal; it doesn’t create a match by itself.</p>
+            <p>Rules: A lead matches a sale if <strong>email OR phone</strong> matches. <strong>Name</strong> is used to break ties and appears in <em>matched_on</em> when equal (order/format insensitive); it doesn’t create a match by itself.</p>
             <p className="mt-2">Privacy: Everything runs in your browser. No uploads.</p>
           </footer>
         </div>
@@ -557,7 +571,6 @@
         let objs = toObjects(rows);
         let headers = rows[0];
 
-        // Optionally add computed FullName if First/Last present
         if (augment) {
           const temp = { fileName: file.name, headers: [...headers], data: objs };
           const augmented = addComputedFullName(temp);
