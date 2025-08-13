@@ -50,20 +50,13 @@
     const normalizeEmail = (e) => (e || '').toString().trim().toLowerCase();
     const normalizePhone = (p) => (p || '').toString().replace(/\D+/g, '').replace(/^1(\d{10})$/, '$1');
 
-    // Robust, order-insensitive name key:
-    // - lowercases
-    // - removes accents
-    // - strips punctuation
-    // - drops titles (mr, mrs, ms, dr) and suffixes (jr, sr, ii/iii/iv)
-    // - removes 1-char middle initials
-    // - sorts tokens so "Doe, John" == "John Doe"
+    // Robust, order-insensitive name key
     function nameKey(raw) {
       if (!raw) return '';
-      let s = raw.toString().normalize('NFD').replace(/[\u0300-\u036f]/g,''); // strip accents
-      s = s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim(); // keep alnum & spaces
+      let s = raw.toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+      s = s.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
       const stop = new Set(['mr','mrs','ms','dr','jr','sr','ii','iii','iv','rev','prof']);
-      const tokens = s.split(/\s+/)
-        .filter(t => t && !stop.has(t) && t.length > 1); // drop 1-char initials
+      const tokens = s.split(/\s+/).filter(t => t && !stop.has(t) && t.length > 1);
       return tokens.sort().join(' ');
     }
     function namesEqual(a, b) { return !!a && !!b && nameKey(a) === nameKey(b); }
@@ -207,7 +200,6 @@
       const sEmail = mapSales.email, sPhone = mapSales.phone, sName = mapSales.name;
       const lEmail = mapLeads.email, lPhone = mapLeads.phone, lName = mapLeads.name;
 
-      // Index sales by email/phone -> arrays (to handle duplicates)
       const emailIdx = new Map(), phoneIdx = new Map();
       const pushMap = (map, key, val) => {
         if (!key) return;
@@ -228,7 +220,6 @@
         const le = normalizeEmail(lead?.[lEmail]);
         const lp = normalizePhone(lead?.[lPhone]);
         const lnRaw = lead?.[lName];
-        const lnKey = nameKey(lnRaw);
 
         const eCands = le ? (emailIdx.get(le) || []) : [];
         const pCands = lp ? (phoneIdx.get(lp) || []) : [];
@@ -238,9 +229,9 @@
         const candSet = new Set([ ...eCands, ...pCands ]);
         const cands = Array.from(candSet);
 
-        // Prefer sale with name match (order/format invariant)
+        // Prefer sale with name match
         let chosen = null;
-        if (sName && lName && lnKey) {
+        if (sName && lName && lnRaw) {
           chosen = cands.find(sale => namesEqual(sale?.[sName], lnRaw)) || null;
         }
         if (!chosen) chosen = cands[0];
@@ -388,7 +379,7 @@
 
       const downloadMatches = () => {
         const rows = matches.map(m => ({
-          matched_on: m.matchedOn,                  // includes 'name' when equal
+          matched_on: m.matchedOn,
           platform_offer: platformOfferLabel((m.lead?.[lPlatform] ?? '').toString()),
           revenue: m.sale?.[sRevenue] ?? '',
           lead_email: m.lead?.[lEmail] ?? '',
@@ -409,6 +400,8 @@
         }));
         downloadCSV('platform_offer_summary.csv', rows);
       };
+
+      const safe = (x) => (x ?? '').toString().trim() || '—';
 
       return (
         <div className="max-w-6xl mx-auto p-6">
@@ -454,7 +447,7 @@
           </div>
 
           <div className="mb-2 text-xs text-gray-500">
-            Tip: If names still don’t flag, confirm the **Sales: Name** and **Leads: Name** mappings point to the right columns (or use the computed FullName).
+            Tip: If names still don’t flag, confirm the **Sales: Name** and **Leads: Name** mappings (or use the computed FullName).
           </div>
 
           <div className="flex flex-wrap gap-4 mb-6">
@@ -532,19 +525,29 @@
                   </tr>
                 </thead>
                 <tbody>
-                  {matches.slice(0,200).map((m, idx) => (
-                    <tr key={idx} className="border-t">
-                      <td className="px-3 py-2">{m.matchedOn}</td>
-                      <td className="px-3 py-2">{platformOfferLabel((m.lead?.[lPlatform] ?? '').toString())}</td>
-                      <td className="px-3 py-2">{(m.sale?.[sRevenue] ?? '').toString()}</td>
-                      <td className="px-3 py-2">{(m.lead?.[lEmail] ?? '').toString()}</td>
-                      <td className="px-3 py-2">{(m.sale?.[sEmail] ?? '').toString()}</td>
-                      <td className="px-3 py-2">{(m.lead?.[lPhone] ?? '').toString()}</td>
-                      <td className="px-3 py-2">{(m.sale?.[sPhone] ?? '').toString()}</td>
-                      <td className="px-3 py-2">{(m.lead?.[lName] ?? '').toString()}</td>
-                      <td className="px-3 py-2">{(m.sale?.[sName] ?? '').toString()}</td>
-                    </tr>
-                  ))}
+                  {matches.slice(0,200).map((m, idx) => {
+                    const leadNm = (m.lead?.[lName] ?? '').toString();
+                    const saleNm = (m.sale?.[sName] ?? '').toString();
+                    const nameMatch = sName && lName && namesEqual(saleNm, leadNm);
+                    return (
+                      <tr key={idx} className="border-t align-top">
+                        <td className="px-3 py-2">
+                          <div className="font-medium">{m.matchedOn || '—'}</div>
+                          <div className="text-xs text-gray-500">
+                            {safe(leadNm)} ↔ {safe(saleNm)}{nameMatch ? ' ✓' : ''}
+                          </div>
+                        </td>
+                        <td className="px-3 py-2">{platformOfferLabel((m.lead?.[lPlatform] ?? '').toString())}</td>
+                        <td className="px-3 py-2">{(m.sale?.[sRevenue] ?? '').toString()}</td>
+                        <td className="px-3 py-2">{(m.lead?.[lEmail] ?? '').toString()}</td>
+                        <td className="px-3 py-2">{(m.sale?.[sEmail] ?? '').toString()}</td>
+                        <td className="px-3 py-2">{(m.lead?.[lPhone] ?? '').toString()}</td>
+                        <td className="px-3 py-2">{(m.sale?.[sPhone] ?? '').toString()}</td>
+                        <td className="px-3 py-2">{safe(leadNm)}</td>
+                        <td className="px-3 py-2">{safe(saleNm)}</td>
+                      </tr>
+                    );
+                  })}
                   {matches.length === 0 && (
                     <tr><td className="px-3 py-6 text-gray-500" colSpan={9}>No matches yet.</td></tr>
                   )}
