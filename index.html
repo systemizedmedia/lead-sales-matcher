@@ -3,17 +3,20 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Lead ⇄ Sales Matcher (Name AND [Email OR Phone])</title>
+  <title>Lead ⇄ Sales Matcher (Email OR Phone)</title>
+  <!-- Tailwind (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React 18 + ReactDOM (CDN) -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel for JSX in this one-file build -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body class="min-h-screen bg-gray-50 text-gray-900">
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useMemo, useState, useEffect } = React;
+    const { useMemo, useState } = React;
 
     // ===== CSV Parsing =====
     function parseCSV(text) {
@@ -33,11 +36,12 @@
       row.push(field); rows.push(row);
       return rows;
     }
+
     function toObjects(rows) {
       if (!rows || rows.length === 0) return [];
-      const headers = rows[0].map(h => (h ?? '').toString().trim());
+      const headers = rows[0].map(h => h.trim());
       return rows.slice(1)
-        .filter(r => r && r.some(x => (x ?? '').toString().trim() !== ''))
+        .filter(r => r.some(x => (x ?? '').toString().trim() !== ''))
         .map(r => {
           const obj = {};
           headers.forEach((h, idx) => (obj[h] = r[idx] ?? ''));
@@ -48,50 +52,13 @@
     // ===== Normalizers =====
     const normalizeEmail = (e) => (e || '').toString().trim().toLowerCase();
     const normalizePhone = (p) => (p || '').toString().replace(/\D+/g, '').replace(/^1(\d{10})$/, '$1');
+    const normalizeName  = (n) => (n || '').toString().trim().toLowerCase().replace(/\s+/g, ' ');
 
-    function buildFullName({ full, first, last }) {
-      const f = (first || '').toString().trim();
-      const l = (last || '').toString().trim();
-      const all = (full || '').toString().trim();
-      if (all) return all;
-      if (f || l) return `${f} ${l}`.trim();
-      return '';
-    }
-
-    function normalizeName(n) {
-      if (!n) return '';
-      let s = n.toString().trim();
-
-      // remove diacritics
-      s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
-      // handle "Last, First (Middle)" -> "First Last"
-      if (s.includes(',')) {
-        const [last, rest] = s.split(',', 2);
-        s = `${rest} ${last}`;
-      }
-
-      // strip common prefixes/suffixes
-      s = s.replace(/\b(mr|mrs|ms|miss|dr|sir|madam|ma'am)\.?\s+/ig, '');
-      s = s.replace(/\b(jr|sr|ii|iii|iv|v)\b\.?/ig, '');
-
-      // drop single-letter middle initials
-      s = s.replace(/\b([A-Z])\b\.?/ig, ' ');
-
-      // keep letters, numbers, spaces, hyphens, apostrophes
-      s = s.replace(/[^A-Za-z0-9 '\-]+/g, ' ');
-
-      // collapse spaces and lowercase
-      s = s.replace(/\s+/g, ' ').trim().toLowerCase();
-
-      return s;
-    }
-
-    // token helper for platform parsing (avoid matching inside words like "loyalty")
+    // Token boundary helper (avoids "loyalty" => YT)
     const tokenRegex = (t) => new RegExp(`(^|[^a-z])${t}([^a-z]|$)`, 'i');
     const toTitle = (s) => s.replace(/\s+/g,' ').trim().replace(/\b\w/g, c => c.toUpperCase());
 
-    // ===== Platform + Offer (same field) =====
+    // ===== Platform + Offer parsing from the SAME field =====
     function canonicalizePlatform(raw) {
       const s = (raw || '').toString().trim();
       if (!s) return 'Unknown';
@@ -100,6 +67,7 @@
       if (/tik\s*tok/i.test(s) || tokenRegex('tt').test(s)) return 'Tiktok';
       return s;
     }
+
     function stripPlatformTokens(raw) {
       let s = (raw || '').toString();
       s = s.replace(/you\s*tube/ig, ' ');
@@ -112,6 +80,7 @@
       s = s.replace(/\s+/g, ' ').trim();
       return s;
     }
+
     function deriveOfferFromPlatformField(raw) {
       const leftover = stripPlatformTokens(raw);
       if (!leftover) return 'Unknown';
@@ -119,13 +88,14 @@
       if (/tune\s*up/i.test(leftover)    || tokenRegex('tup').test(leftover)) return 'Tune Up';
       return toTitle(leftover);
     }
+
     function platformOfferLabel(raw) {
       const p = canonicalizePlatform(raw);
       const o = deriveOfferFromPlatformField(raw);
       return `${p} — ${o}`;
     }
 
-    // ===== Download CSV =====
+    // ===== Utils =====
     function downloadCSV(filename, rows) {
       if (!rows || rows.length === 0) return;
       const headers = Object.keys(rows[0]);
@@ -144,79 +114,57 @@
       document.body.removeChild(a); URL.revokeObjectURL(url);
     }
 
-    // ===== Matching: NAME must match AND (email OR phone) must match (strict, no fuzzy) =====
-    function matchRecordsStrict({ sales, leads, maps }) {
-      const { sEmail, sPhone, sNameFull, sFirst, sLast, lEmail, lPhone, lNameFull, lFirst, lLast } = maps;
+    // ===== Matching: email OR phone (name does NOT create a match) =====
+    function matchRecordsEmailOrPhone({ sales, leads, mapSales, mapLeads }) {
+      const emailIdx = new Map(), phoneIdx = new Map();
+      const sEmail = mapSales.email, sPhone = mapSales.phone;
 
-      const emailIdx = new Map(), phoneIdx = new Map(), nameIdx = new Map();
-
-      // build sale index
       sales.forEach(s => {
-        const e = normalizeEmail(s?.[sEmail]);
-        const p = normalizePhone(s?.[sPhone]);
-        const nameRaw = buildFullName({ full: s?.[sNameFull], first: s?.[sFirst], last: s?.[sLast] });
-        const n = normalizeName(nameRaw);
-
+        const e = normalizeEmail(s[sEmail]);
+        const p = normalizePhone(s[sPhone]);
         if (e && !emailIdx.has(e)) emailIdx.set(e, s);
         if (p && !phoneIdx.has(p)) phoneIdx.set(p, s);
-        // for diagnostics (not used for direct matching without email/phone)
-        if (n) {
-          if (!nameIdx.has(n)) nameIdx.set(n, []);
-          nameIdx.get(n).push(s);
-        }
       });
 
+      const lEmail = mapLeads.email, lPhone = mapLeads.phone;
       const matches = [];
-      let diagEmailOnly = 0, diagPhoneOnly = 0, diagNameOnly = 0;
 
       leads.forEach(lead => {
-        const le = normalizeEmail(lead?.[lEmail]);
-        const lp = normalizePhone(lead?.[lPhone]);
-        const lnameRaw = buildFullName({ full: lead?.[lNameFull], first: lead?.[lFirst], last: lead?.[lLast] });
-        const ln = normalizeName(lnameRaw);
+        const le = normalizeEmail(lead[lEmail]);
+        const lp = normalizePhone(lead[lPhone]);
 
         const eSale = le ? emailIdx.get(le) : null;
         const pSale = lp ? phoneIdx.get(lp) : null;
 
-        const saleCand = (eSale && pSale && eSale === pSale) ? eSale : (eSale || pSale || null);
-        if (saleCand) {
-          const snameRaw = buildFullName({ full: saleCand?.[sNameFull], first: saleCand?.[sFirst], last: saleCand?.[sLast] });
-          const sn = normalizeName(snameRaw);
-          if (ln && sn && ln === sn) {
-            const matchedOn =
-              (eSale && pSale && eSale === pSale) ? 'name+email+phone'
-              : (eSale ? 'name+email' : 'name+phone');
-            matches.push({ lead, sale: saleCand, matchedOn });
-          } else {
-            if (eSale && !pSale) diagEmailOnly++;
-            if (pSale && !eSale) diagPhoneOnly++;
-            if (!eSale && !pSale && ln && nameIdx.has(ln)) diagNameOnly++;
-          }
-        } else {
-          if (le && emailIdx.has(le)) diagEmailOnly++;
-          if (lp && phoneIdx.has(lp)) diagPhoneOnly++;
-          if (ln && nameIdx.has(ln)) diagNameOnly++;
+        if (eSale && pSale && eSale === pSale) {
+          matches.push({ lead, sale: eSale, matchedOn: 'email|phone' });
+        } else if (eSale) {
+          matches.push({ lead, sale: eSale, matchedOn: 'email' });
+        } else if (pSale) {
+          matches.push({ lead, sale: pSale, matchedOn: 'phone' });
         }
+        // name-only is ignored by design
       });
 
-      return { matches, diagnostics: { emailOnly: diagEmailOnly, phoneOnly: diagPhoneOnly, nameOnly: diagNameOnly } };
+      return matches;
     }
 
-    // ===== De-dup helpers & summaries =====
-    function makeSaleKeyFactory(sEmail, sPhone, sNameFull, sFirst, sLast, sRevenue) {
+    // ===== De-dup helpers =====
+    function makeSaleKeyFactory(sEmail, sPhone, sName, sRevenue) {
       return function saleKey(saleObj) {
         const e = normalizeEmail(saleObj?.[sEmail]);
         const p = normalizePhone(saleObj?.[sPhone]);
-        const n = normalizeName(buildFullName({ full: saleObj?.[sNameFull], first: saleObj?.[sFirst], last: saleObj?.[sLast] }));
+        const n = normalizeName(saleObj?.[sName]);
         const rev = (saleObj?.[sRevenue] ?? '').toString().replace(/[^0-9.\-]/g, '');
         return JSON.stringify([e, p, n, rev]);
       };
     }
-    function makeLeadKeyFactory(lEmail, lPhone, lNameFull, lFirst, lLast) {
+
+    function makeLeadKeyFactory(lEmail, lPhone, lName) {
       return function leadKey(leadObj) {
         const e = normalizeEmail(leadObj?.[lEmail]);
         const p = normalizePhone(leadObj?.[lPhone]);
-        const n = normalizeName(buildFullName({ full: leadObj?.[lNameFull], first: leadObj?.[lFirst], last: leadObj?.[lLast] }));
+        const n = normalizeName(leadObj?.[lName]);
         return JSON.stringify([e, p, n]);
       };
     }
@@ -240,37 +188,6 @@
       return Array.from(map.values()).sort((a,b) => b.revenue - a.revenue);
     }
 
-    function groupByCorePlatforms(matches, platformKey, revenueKey, saleKeyFn) {
-      const order = ['Youtube', 'Facebook', 'Tiktok'];
-      const map = new Map(order.map(p => [p, { platform: p, leads: 0, revenue: 0 }]));
-      const seenSalesByPlatform = new Map(order.map(p => [p, new Set()]));
-
-      matches.forEach(m => {
-        const raw = (m.lead?.[platformKey] ?? '').toString();
-        const p = canonicalizePlatform(raw);
-        if (!map.has(p)) return;
-        const revenue = parseFloat((m.sale?.[revenueKey] ?? '').toString().replace(/[^0-9.\-]/g, '')) || 0;
-
-        map.get(p).leads += 1;
-
-        const k = saleKeyFn(m.sale);
-        const seenSet = seenSalesByPlatform.get(p);
-        if (!seenSet.has(k)) {
-          map.get(p).revenue += revenue;
-          seenSet.add(k);
-        }
-      });
-
-      return order.map(p => map.get(p));
-    }
-
-    // ===== Header guesser =====
-    function guessHeader(headers, patterns, fallback = '') {
-      const h = headers || [];
-      const idx = h.findIndex(col => patterns.some(rx => rx.test(col)));
-      return idx >= 0 ? h[idx] : fallback;
-    }
-
     function App() {
       const [salesFile, setSalesFile] = useState(null);
       const [leadsFile, setLeadsFile] = useState(null);
@@ -278,90 +195,54 @@
       const salesHeaders = useMemo(() => salesFile?.headers || [], [salesFile]);
       const leadsHeaders = useMemo(() => leadsFile?.headers || [], [leadsFile]);
 
-      // Sales mappings
+      // Column mapping
       const [sEmail, setSEmail] = useState("");
       const [sPhone, setSPhone] = useState("");
-      const [sNameFull, setSNameFull] = useState("");
-      const [sFirst, setSFirst] = useState("");
-      const [sLast, setSLast] = useState("");
+      const [sName, setSName] = useState("");
       const [sRevenue, setSRevenue] = useState("");
 
-      // Lead mappings
       const [lEmail, setLEmail] = useState("");
       const [lPhone, setLPhone] = useState("");
-      const [lNameFull, setLNameFull] = useState("");
-      const [lFirst, setLFirst] = useState("");
-      const [lLast, setLLast] = useState("");
+      const [lName, setLName] = useState("");
       const [lPlatform, setLPlatform] = useState("");
 
-      // Auto-guess after load
-      useEffect(() => {
-        if (!salesFile) return;
-        const H = salesFile.headers;
-        setSEmail(v => v || guessHeader(H, [/^e-?mail$/i, /email/i]));
-        setSPhone(v => v || guessHeader(H, [/^phone$/i, /mobile/i, /contact/i, /cell/i]));
-        setSNameFull(v => v || guessHeader(H, [/^name$/i, /full.?name/i, /customer.?name/i]));
-        setSFirst(v => v || guessHeader(H, [/^first.?name$/i, /\bfname\b/i]));
-        setSLast(v => v || guessHeader(H, [/^last.?name$/i, /\blname\b/i, /surname/i]));
-        setSRevenue(v => v || guessHeader(H, [/revenue/i, /amount/i, /total/i, /contract/i, /sale/i, /job.*(value|amount)/i]));
-      }, [salesFile]);
-
-      useEffect(() => {
-        if (!leadsFile) return;
-        const H = leadsFile.headers;
-        setLEmail(v => v || guessHeader(H, [/^e-?mail$/i, /email/i]));
-        setLPhone(v => v || guessHeader(H, [/^phone$/i, /mobile/i, /contact/i, /cell/i]));
-        setLNameFull(v => v || guessHeader(H, [/^name$/i, /full.?name/i]));
-        setLFirst(v => v || guessHeader(H, [/^first.?name$/i, /\bfname\b/i]));
-        setLLast(v => v || guessHeader(H, [/^last.?name$/i, /\blname\b/i, /surname/i]));
-        setLPlatform(v => v || guessHeader(H, [/platform/i, /source/i, /campaign/i, /ad.?name/i, /utm.*source/i]));
-      }, [leadsFile]);
-
-      // Require name mapping on BOTH sides (either Full Name OR First+Last), plus revenue/platform and at least one of email/phone on each side
-      const haveSalesName = !!(sNameFull || (sFirst && sLast));
-      const haveLeadsName = !!(lNameFull || (lFirst && lLast));
       const ready = salesFile && leadsFile && sRevenue && lPlatform &&
-                    (sEmail || sPhone) && (lEmail || lPhone) &&
-                    haveSalesName && haveLeadsName;
+        (sEmail || sPhone) && (lEmail || lPhone); // name not required for matching
 
-      // Matching
-      const { matches: rawMatches, diagnostics } = useMemo(() => {
-        if (!ready) return { matches: [], diagnostics: { emailOnly: 0, phoneOnly: 0, nameOnly: 0 } };
-        return matchRecordsStrict({
+      // Matches (email OR phone)
+      const rawMatches = useMemo(() => {
+        if (!ready) return [];
+        return matchRecordsEmailOrPhone({
           sales: salesFile.data,
           leads: leadsFile.data,
-          maps: { sEmail, sPhone, sNameFull, sFirst, sLast, lEmail, lPhone, lNameFull, lFirst, lLast }
+          mapSales: { email: sEmail, phone: sPhone },
+          mapLeads: { email: lEmail, phone: lPhone },
         });
-      }, [ready, salesFile, leadsFile, sEmail, sPhone, sNameFull, sFirst, sLast, lEmail, lPhone, lNameFull, lFirst, lLast]);
+      }, [ready, salesFile, leadsFile, sEmail, sPhone, lEmail, lPhone]);
 
-      // De-dup by lead identity
+      // Deduplicate by lead identity (keep first row so platform/offer sticks)
       const matches = useMemo(() => {
         if (!ready) return [];
         const seen = new Set();
-        const leadKey = makeLeadKeyFactory(lEmail, lPhone, lNameFull, lFirst, lLast);
+        const leadKey = makeLeadKeyFactory(lEmail, lPhone, lName);
         const out = [];
         for (const m of rawMatches) {
           const k = leadKey(m.lead);
           if (!seen.has(k)) { seen.add(k); out.push(m); }
         }
         return out;
-      }, [ready, rawMatches, lEmail, lPhone, lNameFull, lFirst, lLast]);
+      }, [ready, rawMatches, lEmail, lPhone, lName]);
 
-      const saleKey = useMemo(
-        () => makeSaleKeyFactory(sEmail, sPhone, sNameFull, sFirst, sLast, sRevenue),
-        [sEmail, sPhone, sNameFull, sFirst, sLast, sRevenue]
-      );
+      // sale-key for revenue de-dup
+      const saleKey = useMemo(() => makeSaleKeyFactory(sEmail, sPhone, sName, sRevenue), [sEmail, sPhone, sName, sRevenue]);
 
+      // Combined Platform (Offer) summary
       const platformOfferSummary = useMemo(() => {
         if (!ready) return [];
         return groupByPlatformOfferSummary(matches, lPlatform, sRevenue, saleKey, platformOfferLabel);
       }, [matches, ready, lPlatform, sRevenue, saleKey]);
 
-      const platformOnlySummary = useMemo(() => {
-        if (!ready) return [];
-        return groupByCorePlatforms(matches, lPlatform, sRevenue, saleKey);
-      }, [matches, ready, lPlatform, sRevenue, saleKey]);
-
+      // De-duped overall total revenue (unique sales)
       const totalRevenue = useMemo(() => {
         const seen = new Set();
         let sum = 0;
@@ -369,7 +250,8 @@
           const k = saleKey(m.sale);
           if (!seen.has(k)) {
             const revenue = parseFloat((m.sale?.[sRevenue] ?? '').toString().replace(/[^0-9.\-]/g, '')) || 0;
-            sum += revenue; seen.add(k);
+            sum += revenue;
+            seen.add(k);
           }
         });
         return sum;
@@ -384,22 +266,19 @@
           sale_email: m.sale?.[sEmail] ?? '',
           lead_phone: m.lead?.[lPhone] ?? '',
           sale_phone: m.sale?.[sPhone] ?? '',
-          lead_name: buildFullName({ full: m.lead?.[lNameFull], first: m.lead?.[lFirst], last: m.lead?.[lLast] }),
-          sale_name: buildFullName({ full: m.sale?.[sNameFull], first: m.sale?.[sFirst], last: m.sale?.[sLast] }),
+          lead_name: m.lead?.[lName] ?? '',
+          sale_name: m.sale?.[sName] ?? '',
         }));
         downloadCSV('matched_leads.csv', rows);
       };
+
       const downloadPlatformOfferSummary = () => {
         const rows = platformOfferSummary.map(r => ({
-          platform_offer: r.label, leads: r.leads, revenue: r.revenue.toFixed(2)
+          platform_offer: r.label,
+          leads: r.leads,
+          revenue: r.revenue.toFixed(2)
         }));
         downloadCSV('platform_offer_summary.csv', rows);
-      };
-      const downloadPlatformOnlySummary = () => {
-        const rows = platformOnlySummary.map(r => ({
-          platform: r.platform, leads: r.leads, revenue: r.revenue.toFixed(2)
-        }));
-        downloadCSV('platform_summary_core.csv', rows);
       };
 
       return (
@@ -407,7 +286,7 @@
           <header className="mb-6">
             <h1 className="text-2xl md:text-3xl font-bold">Lead ⇄ Sales Matcher</h1>
             <p className="text-sm text-gray-600 mt-1">
-              Strict: <strong>Name</strong> must match and <strong>Email or Phone</strong> must match • De-duped by lead & sale • Platform names include Offer
+              Match when <strong>email OR phone</strong> matches • De-duped by lead & sale • Platform names include Offer
             </p>
           </header>
 
@@ -415,31 +294,33 @@
             <div className="rounded-2xl border p-4 bg-white">
               <h2 className="font-semibold mb-3">1) Upload Sales CSV</h2>
               <FilePicker label="Sales CSV" onLoad={setSalesFile} />
-              {salesFile && <div className="mt-3 text-xs text-gray-600">Loaded <strong>{salesFile.fileName}</strong> with {salesFile.data.length.toLocaleString()} rows.</div>}
+              {salesFile && (
+                <div className="mt-3 text-xs text-gray-600">
+                  Loaded <strong>{salesFile.fileName}</strong> with {salesFile.data.length.toLocaleString()} rows.
+                </div>
+              )}
               <div className="mt-4 grid grid-cols-2 gap-3">
-                <Select label="Sales: Email" value={sEmail} onChange={setSEmail} options={['', ...salesHeaders]} disabled={!salesFile}/>
-                <Select label="Sales: Phone" value={sPhone} onChange={setSPhone} options={['', ...salesHeaders]} disabled={!salesFile}/>
-                <Select label="Sales: Full Name (if any)" value={sNameFull} onChange={setSNameFull} options={['', ...salesHeaders]} disabled={!salesFile}/>
-                <Select label="Sales: First Name (optional)" value={sFirst} onChange={setSFirst} options={['', ...salesHeaders]} disabled={!salesFile}/>
-                <Select label="Sales: Last Name (optional)" value={sLast} onChange={setSLast} options={['', ...salesHeaders]} disabled={!salesFile}/>
-                <Select label="Sales: Revenue $" value={sRevenue} onChange={setSRevenue} options={['', ...salesHeaders]} disabled={!salesFile}/>
+                <Select label="Sales: Email"     value={sEmail}    onChange={setSEmail}  options={salesHeaders} />
+                <Select label="Sales: Phone"     value={sPhone}    onChange={setSPhone}  options={salesHeaders} />
+                <Select label="Sales: Name (optional)" value={sName} onChange={setSName} options={['', ...salesHeaders]} />
+                <Select label="Sales: Revenue $" value={sRevenue}  onChange={setSRevenue} options={salesHeaders} />
               </div>
-              {!haveSalesName && <p className="text-xs text-red-600 mt-2">Pick either Full Name, or both First & Last.</p>}
             </div>
 
             <div className="rounded-2xl border p-4 bg-white">
               <h2 className="font-semibold mb-3">2) Upload Lead Database CSV</h2>
               <FilePicker label="Leads CSV" onLoad={setLeadsFile} />
-              {leadsFile && <div className="mt-3 text-xs text-gray-600">Loaded <strong>{leadsFile.fileName}</strong> with {leadsFile.data.length.toLocaleString()} rows.</div>}
+              {leadsFile && (
+                <div className="mt-3 text-xs text-gray-600">
+                  Loaded <strong>{leadsFile.fileName}</strong> with {leadsFile.data.length.toLocaleString()} rows.
+                </div>
+              )}
               <div className="mt-4 grid grid-cols-2 gap-3">
-                <Select label="Leads: Email" value={lEmail} onChange={setLEmail} options={['', ...leadsHeaders]} disabled={!leadsFile}/>
-                <Select label="Leads: Phone" value={lPhone} onChange={setLPhone} options={['', ...leadsHeaders]} disabled={!leadsFile}/>
-                <Select label="Leads: Full Name (if any)" value={lNameFull} onChange={setLNameFull} options={['', ...leadsHeaders]} disabled={!leadsFile}/>
-                <Select label="Leads: First Name (optional)" value={lFirst} onChange={setLFirst} options={['', ...leadsHeaders]} disabled={!leadsFile}/>
-                <Select label="Leads: Last Name (optional)" value={lLast} onChange={setLLast} options={['', ...leadsHeaders]} disabled={!leadsFile}/>
-                <Select label="Leads: Platform+Offer" value={lPlatform} onChange={setLPlatform} options={['', ...leadsHeaders]} disabled={!leadsFile}/>
+                <Select label="Leads: Email"     value={lEmail}     onChange={setLEmail}    options={leadsHeaders} />
+                <Select label="Leads: Phone"     value={lPhone}     onChange={setLPhone}    options={leadsHeaders} />
+                <Select label="Leads: Name (optional)" value={lName} onChange={setLName}   options={['', ...leadsHeaders]} />
+                <Select label="Leads: Platform+Offer" value={lPlatform} onChange={setLPlatform} options={leadsHeaders} />
               </div>
-              {!haveLeadsName && <p className="text-xs text-red-600 mt-2">Pick either Full Name, or both First & Last.</p>}
             </div>
           </div>
 
@@ -450,85 +331,50 @@
             <SummaryCard title="Revenue (All)" value={`$${totalRevenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}`} sub="De-duped by sale" />
           </div>
 
-          <div className="rounded-2xl border bg-white mb-6">
-            <div className="p-4 border-b flex items-center justify-between">
-              <h3 className="font-semibold">Diagnostics</h3>
-              <div className="text-xs text-gray-500">Helps explain zero matches</div>
-            </div>
-            <div className="p-4 grid sm:grid-cols-3 gap-3 text-sm">
-              <div className="rounded-xl border p-3">
-                <div className="text-gray-500">Email matched but name didn’t</div>
-                <div className="text-xl font-semibold">{diagnostics.emailOnly.toLocaleString()}</div>
-              </div>
-              <div className="rounded-xl border p-3">
-                <div className="text-gray-500">Phone matched but name didn’t</div>
-                <div className="text-xl font-semibold">{diagnostics.phoneOnly.toLocaleString()}</div>
-              </div>
-              <div className="rounded-xl border p-3">
-                <div className="text-gray-500">Name matched but no email/phone</div>
-                <div className="text-xl font-semibold">{diagnostics.nameOnly.toLocaleString()}</div>
-              </div>
-            </div>
-          </div>
-
-          <div className="mb-4 flex flex-wrap gap-3">
-            <button disabled={!ready || matches.length === 0} onClick={downloadMatches}
-              className={`px-4 py-2 rounded-xl text-sm font-medium shadow-sm ${(!ready || matches.length===0) ? 'bg-gray-200 text-gray-500' : 'bg-black text-white'}`}>
+          <div className="mb-4 flex gap-3">
+            <button
+              disabled={!ready || matches.length === 0}
+              onClick={downloadMatches}
+              className={`px-4 py-2 rounded-xl text-sm font-medium shadow-sm ${(!ready || matches.length===0) ? 'bg-gray-200 text-gray-500' : 'bg-black text-white'}`}
+            >
               Download Matched CSV
             </button>
-            <button disabled={!ready || platformOfferSummary.length === 0} onClick={downloadPlatformOfferSummary}
-              className={`px-4 py-2 rounded-xl text-sm font-medium shadow-sm ${(!ready || platformOfferSummary.length===0) ? 'bg-gray-200 text-gray-500' : 'bg-black text-white'}`}>
+            <button
+              disabled={!ready || platformOfferSummary.length === 0}
+              onClick={downloadPlatformOfferSummary}
+              className={`px-4 py-2 rounded-xl text-sm font-medium shadow-sm ${(!ready || platformOfferSummary.length===0) ? 'bg-gray-200 text-gray-500' : 'bg-black text-white'}`}
+            >
               Download Platform+Offer Summary CSV
-            </button>
-            <button disabled={!ready || platformOnlySummary.length === 0} onClick={downloadPlatformOnlySummary}
-              className={`px-4 py-2 rounded-xl text-sm font-medium shadow-sm ${(!ready || platformOnlySummary.length===0) ? 'bg-gray-200 text-gray-500' : 'bg-black text-white'}`}>
-              Download Platform Summary (YouTube/Facebook/TikTok)
             </button>
           </div>
 
-          <div className="grid lg:grid-cols-2 gap-6">
-            <div className="rounded-2xl border bg-white">
-              <div className="p-4 border-b flex items-center justify-between">
-                <h3 className="font-semibold">Platform (Offer) Summary</h3>
-                <div className="text-xs text-gray-500">Platforms: Youtube, Facebook, Tiktok • Offers: Free Quote, Tune Up (fallback: “as is”)</div>
-              </div>
-              <div className="p-4 overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead><tr className="text-left text-gray-600"><th className="px-3 py-2">Platform — Offer</th><th className="px-3 py-2">Matched Leads</th><th className="px-3 py-2">Revenue</th></tr></thead>
-                  <tbody>
-                    {platformOfferSummary.map((r, idx) => (
-                      <tr key={idx} className="border-t">
-                        <td className="px-3 py-2">{r.label}</td>
-                        <td className="px-3 py-2">{r.leads.toLocaleString()}</td>
-                        <td className="px-3 py-2">${r.revenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                      </tr>
-                    ))}
-                    {platformOfferSummary.length === 0 && <tr><td className="px-3 py-6 text-gray-500" colSpan={3}>No data yet. Upload files and map columns.</td></tr>}
-                  </tbody>
-                </table>
-              </div>
+          <div className="rounded-2xl border bg-white">
+            <div className="p-4 border-b flex items-center justify-between">
+              <h3 className="font-semibold">Platform (Offer) Summary</h3>
+              <div className="text-xs text-gray-500">Platforms: Youtube, Facebook, Tiktok • Offers: Free Quote, Tune Up (fallback: “as is”)</div>
             </div>
-
-            <div className="rounded-2xl border bg-white">
-              <div className="p-4 border-b flex items-center justify-between">
-                <h3 className="font-semibold">Platform Summary (YouTube, Facebook, TikTok)</h3>
-                <div className="text-xs text-gray-500">Core platforms only • Aggregated regardless of Offer</div>
-              </div>
-              <div className="p-4 overflow-x-auto">
-                <table className="min-w-full text-sm">
-                  <thead><tr className="text-left text-gray-600"><th className="px-3 py-2">Platform</th><th className="px-3 py-2">Matched Leads</th><th className="px-3 py-2">Revenue</th></tr></thead>
-                  <tbody>
-                    {platformOnlySummary.map((r, idx) => (
-                      <tr key={idx} className="border-t">
-                        <td className="px-3 py-2">{r.platform}</td>
-                        <td className="px-3 py-2">{r.leads.toLocaleString()}</td>
-                        <td className="px-3 py-2">${r.revenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                      </tr>
-                    ))}
-                    {platformOnlySummary.length === 0 && <tr><td className="px-3 py-6 text-gray-500" colSpan={3}>No data yet. Upload files and map columns.</td></tr>}
-                  </tbody>
-                </table>
-              </div>
+            <div className="p-4 overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-600">
+                    <th className="px-3 py-2">Platform — Offer</th>
+                    <th className="px-3 py-2">Matched Leads</th>
+                    <th className="px-3 py-2">Revenue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {platformOfferSummary.map((r, idx) => (
+                    <tr key={idx} className="border-t">
+                      <td className="px-3 py-2">{r.label}</td>
+                      <td className="px-3 py-2">{r.leads.toLocaleString()}</td>
+                      <td className="px-3 py-2">${r.revenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
+                    </tr>
+                  ))}
+                  {platformOfferSummary.length === 0 && (
+                    <tr><td className="px-3 py-6 text-gray-500" colSpan={3}>No data yet. Upload files and map columns.</td></tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -562,17 +408,12 @@
                       <td className="px-3 py-2">{(m.sale?.[sEmail] ?? '').toString()}</td>
                       <td className="px-3 py-2">{(m.lead?.[lPhone] ?? '').toString()}</td>
                       <td className="px-3 py-2">{(m.sale?.[sPhone] ?? '').toString()}</td>
-                      <td className="px-3 py-2">{buildFullName({ full: m.lead?.[lNameFull], first: m.lead?.[lFirst], last: m.lead?.[lLast] })}</td>
-                      <td className="px-3 py-2">{buildFullName({ full: m.sale?.[sNameFull], first: m.sale?.[sFirst], last: m.sale?.[sLast] })}</td>
+                      <td className="px-3 py-2">{(m.lead?.[lName] ?? '').toString()}</td>
+                      <td className="px-3 py-2">{(m.sale?.[sName] ?? '').toString()}</td>
                     </tr>
                   ))}
                   {matches.length === 0 && (
-                    <tr><td className="px-3 py-6 text-gray-500" colSpan={9}>
-                      No matches yet. Check that:<br/>
-                      • You mapped Full Name or First+Last on both files<br/>
-                      • Names aren’t reversed (“Last, First”), have middle initials, or honorifics — we auto-clean these now<br/>
-                      • At least one of Email/Phone exists on each side
-                    </td></tr>
+                    <tr><td className="px-3 py-6 text-gray-500" colSpan={9}>No matches yet.</td></tr>
                   )}
                 </tbody>
               </table>
@@ -580,14 +421,14 @@
           </div>
 
           <footer className="text-xs text-gray-500 mt-8">
-            <p>Rules: A lead matches a sale if <strong>Name</strong> matches and <strong>Email or Phone</strong> matches (strict, no fuzzy).</p>
+            <p>Rules: A lead matches a sale if <strong>email OR phone</strong> matches. Name is ignored for matching.</p>
             <p className="mt-2">Privacy: Everything runs in your browser. No uploads.</p>
           </footer>
         </div>
       );
     }
 
-    // Reusable UI
+    // ===== Reusable UI components =====
     function FilePicker({ label, onLoad }) {
       const handle = async (e) => {
         const file = e.target.files?.[0];
@@ -595,7 +436,7 @@
         const text = await file.text();
         const rows = parseCSV(text);
         const objs = toObjects(rows);
-        onLoad({ fileName: file.name, headers: rows[0] || [], data: objs });
+        onLoad({ fileName: file.name, headers: rows[0], data: objs });
       };
       return (
         <div className="flex flex-col gap-2">
@@ -605,24 +446,20 @@
         </div>
       );
     }
-    function Select({ label, value, onChange, options, disabled }) {
-      const hasOptions = Array.isArray(options) && options.length > 0;
+
+    function Select({ label, value, onChange, options }) {
       return (
         <div className="flex flex-col gap-1 min-w-[200px]">
           <label className="text-xs text-gray-600">{label}</label>
-          <select
-            value={hasOptions ? value : ''}
-            onChange={(e) => onChange(e.target.value)}
-            className="rounded-xl border px-3 py-2 text-sm disabled:bg-gray-100 disabled:text-gray-400"
-            disabled={disabled || !hasOptions}
-          >
-            {(options || ['']).map(opt =>
-              <option key={String(opt)} value={opt}>{opt === '' ? '— Select —' : opt}</option>
+          <select value={value} onChange={(e) => onChange(e.target.value)} className="rounded-xl border px-3 py-2 text-sm">
+            {options.map(opt =>
+              <option key={opt} value={opt}>{opt === '' ? '— Select —' : opt}</option>
             )}
           </select>
         </div>
       );
     }
+
     function SummaryCard({ title, value, sub }) {
       return (
         <div className="rounded-2xl border p-4 shadow-sm bg-white">
