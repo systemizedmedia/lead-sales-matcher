@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Lead ⇄ Sales Matcher (Email OR Phone)</title>
+  <title>Lead ⇄ Sales Matcher (Email OR Phone + Name-aware)</title>
   <!-- Tailwind (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React 18 + ReactDOM (CDN) -->
@@ -114,36 +114,57 @@
       document.body.removeChild(a); URL.revokeObjectURL(url);
     }
 
-    // ===== Matching: email OR phone (name does NOT create a match) =====
+    // ===== Matching: email OR phone, with NAME used to refine/annotate =====
     function matchRecordsEmailOrPhone({ sales, leads, mapSales, mapLeads }) {
+      const sEmail = mapSales.email, sPhone = mapSales.phone, sName = mapSales.name;
+      const lEmail = mapLeads.email, lPhone = mapLeads.phone, lName = mapLeads.name;
+
+      // Index sales by email/phone -> arrays (to handle duplicates)
       const emailIdx = new Map(), phoneIdx = new Map();
-      const sEmail = mapSales.email, sPhone = mapSales.phone;
+      const pushMap = (map, key, val) => {
+        if (!key) return;
+        if (!map.has(key)) map.set(key, [val]);
+        else map.get(key).push(val);
+      };
 
       sales.forEach(s => {
-        const e = normalizeEmail(s[sEmail]);
-        const p = normalizePhone(s[sPhone]);
-        if (e && !emailIdx.has(e)) emailIdx.set(e, s);
-        if (p && !phoneIdx.has(p)) phoneIdx.set(p, s);
+        const e = normalizeEmail(s?.[sEmail]);
+        const p = normalizePhone(s?.[sPhone]);
+        if (e) pushMap(emailIdx, e, s);
+        if (p) pushMap(phoneIdx, p, s);
       });
 
-      const lEmail = mapLeads.email, lPhone = mapLeads.phone;
       const matches = [];
 
       leads.forEach(lead => {
-        const le = normalizeEmail(lead[lEmail]);
-        const lp = normalizePhone(lead[lPhone]);
+        const le = normalizeEmail(lead?.[lEmail]);
+        const lp = normalizePhone(lead?.[lPhone]);
+        const ln = lName ? normalizeName(lead?.[lName]) : '';
 
-        const eSale = le ? emailIdx.get(le) : null;
-        const pSale = lp ? phoneIdx.get(lp) : null;
+        const eCands = le ? (emailIdx.get(le) || []) : [];
+        const pCands = lp ? (phoneIdx.get(lp) || []) : [];
 
-        if (eSale && pSale && eSale === pSale) {
-          matches.push({ lead, sale: eSale, matchedOn: 'email|phone' });
-        } else if (eSale) {
-          matches.push({ lead, sale: eSale, matchedOn: 'email' });
-        } else if (pSale) {
-          matches.push({ lead, sale: pSale, matchedOn: 'phone' });
+        // Require at least email OR phone candidate
+        if (eCands.length === 0 && pCands.length === 0) return;
+
+        // Unique candidate set
+        const candSet = new Set([ ...eCands, ...pCands ]);
+        const cands = Array.from(candSet);
+
+        // Prefer a candidate whose NAME also matches (if both names provided)
+        let chosen = null;
+        if (sName && lName && ln) {
+          chosen = cands.find(sale => normalizeName(sale?.[sName]) === ln) || null;
         }
-        // name-only is ignored by design
+        if (!chosen) chosen = cands[0];
+
+        // Figure out which fields matched for the chosen sale
+        const matchedFields = [];
+        if (le && eCands.includes(chosen)) matchedFields.push('email');
+        if (lp && pCands.includes(chosen)) matchedFields.push('phone');
+        if (sName && lName && ln && normalizeName(chosen?.[sName]) === ln) matchedFields.push('name');
+
+        matches.push({ lead, sale: chosen, matchedOn: matchedFields.join('|') || 'email|phone' });
       });
 
       return matches;
@@ -207,18 +228,18 @@
       const [lPlatform, setLPlatform] = useState("");
 
       const ready = salesFile && leadsFile && sRevenue && lPlatform &&
-        (sEmail || sPhone) && (lEmail || lPhone); // name not required for matching
+        (sEmail || sPhone) && (lEmail || lPhone); // name optional but considered
 
-      // Matches (email OR phone)
+      // Matches (email OR phone, name-aware)
       const rawMatches = useMemo(() => {
         if (!ready) return [];
         return matchRecordsEmailOrPhone({
           sales: salesFile.data,
           leads: leadsFile.data,
-          mapSales: { email: sEmail, phone: sPhone },
-          mapLeads: { email: lEmail, phone: lPhone },
+          mapSales: { email: sEmail, phone: sPhone, name: sName },
+          mapLeads: { email: lEmail, phone: lPhone, name: lName },
         });
-      }, [ready, salesFile, leadsFile, sEmail, sPhone, lEmail, lPhone]);
+      }, [ready, salesFile, leadsFile, sEmail, sPhone, sName, lEmail, lPhone, lName]);
 
       // Deduplicate by lead identity (keep first row so platform/offer sticks)
       const matches = useMemo(() => {
@@ -286,7 +307,7 @@
           <header className="mb-6">
             <h1 className="text-2xl md:text-3xl font-bold">Lead ⇄ Sales Matcher</h1>
             <p className="text-sm text-gray-600 mt-1">
-              Match when <strong>email OR phone</strong> matches • De-duped by lead & sale • Platform names include Offer
+              Match when <strong>email OR phone</strong> matches • <strong>Name</strong> is used to disambiguate & noted in <em>matched_on</em> • De-duped by lead & sale • Platform names include Offer
             </p>
           </header>
 
@@ -421,7 +442,7 @@
           </div>
 
           <footer className="text-xs text-gray-500 mt-8">
-            <p>Rules: A lead matches a sale if <strong>email OR phone</strong> matches. Name is ignored for matching.</p>
+            <p>Rules: A lead matches a sale if <strong>email OR phone</strong> matches. <strong>Name</strong> is considered for tie-breaking and shown in <em>matched_on</em>, but does not match by itself.</p>
             <p className="mt-2">Privacy: Everything runs in your browser. No uploads.</p>
           </footer>
         </div>
