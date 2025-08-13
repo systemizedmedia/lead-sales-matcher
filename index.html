@@ -288,28 +288,28 @@
       return Array.from(map.values()).sort((a,b) => b.revenue - a.revenue);
     }
 
-    // NEW: Platform-only summary for Youtube, Facebook, Tiktok
+    // Platform-only summary with an "Other" bucket
     function groupByPlatformOnly(matches, platformKey, revenueKey, saleKeyFn) {
       const targets = ['Youtube', 'Facebook', 'Tiktok'];
-      const map = new Map(targets.map(p => [p, { label: p, leads: 0, revenue: 0 }]));
-      const seenSales = new Set(); // de-dup revenue across the whole table
+      const map = new Map([...targets, 'Other'].map(p => [p, { label: p, leads: 0, revenue: 0 }]));
+      const seenSales = new Set(); // de-dup revenue across all rows
 
       matches.forEach(m => {
         const raw = (m.lead?.[platformKey] ?? '').toString();
         const plat = canonicalizePlatform(raw);
-        if (!map.has(plat)) return; // ignore non-target platforms
+        const bucket = targets.includes(plat) ? plat : 'Other';
 
         const revenueRaw = m.sale?.[revenueKey];
         const revenue = parseFloat((revenueRaw ?? '').toString().replace(/[^0-9.\-]/g, '')) || 0;
 
-        const obj = map.get(plat);
+        const obj = map.get(bucket);
         obj.leads += 1;
 
         const k = saleKeyFn(m.sale);
         if (!seenSales.has(k)) { obj.revenue += revenue; seenSales.add(k); }
       });
 
-      return targets.map(p => map.get(p));
+      return [...targets, 'Other'].map(p => map.get(p));
     }
 
     function App() {
@@ -387,7 +387,7 @@
         return groupByPlatformOfferSummary(matches, lPlatform, sRevenue, saleKey, platformOfferLabel);
       }, [matches, ready, lPlatform, sRevenue, saleKey]);
 
-      // NEW: Platform-only summary (YT/FB/TT)
+      // Platform-only summary (YT/FB/TT + Other)
       const platformOnlySummary = useMemo(() => {
         if (!ready) return [];
         return groupByPlatformOnly(matches, lPlatform, sRevenue, saleKey);
@@ -521,7 +521,7 @@
             </button>
           </div>
 
-          <!-- Existing Platform (Offer) Summary -->
+          {/* Platform (Offer) Summary */}
           <div className="rounded-2xl border bg-white">
             <div className="p-4 border-b flex items-center justify-between">
               <h3 className="font-semibold">Platform (Offer) Summary</h3>
@@ -552,10 +552,10 @@
             </div>
           </div>
 
-          <!-- NEW: Platform-only Summary (YT/FB/TT) -->
+          {/* Platform-only Summary (YT/FB/TT + Other) */}
           <div className="rounded-2xl border bg-white mt-6">
             <div className="p-4 border-b flex items-center justify-between">
-              <h3 className="font-semibold">Platform Summary (Youtube / Facebook / Tiktok)</h3>
+              <h3 className="font-semibold">Platform Summary (Youtube / Facebook / Tiktok / Other)</h3>
               <div className="text-xs text-gray-500">Counts & revenue are deduped by sale.</div>
             </div>
             <div className="p-4 overflow-x-auto">
@@ -583,6 +583,7 @@
             </div>
           </div>
 
+          {/* Matched Rows (Preview) */}
           <div className="rounded-2xl border bg-white mt-6">
             <div className="p-4 border-b flex items-center justify-between">
               <h3 className="font-semibold">Matched Rows (Preview)</h3>
