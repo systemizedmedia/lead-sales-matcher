@@ -164,7 +164,7 @@
         if (lp && pCands.includes(chosen)) matchedFields.push('phone');
         if (sName && lName && ln && normalizeName(chosen?.[sName]) === ln) matchedFields.push('name');
 
-        matches.push({ lead, sale: chosen, matchedOn: matchedFields.join('|') || 'email|phone' });
+        matches.push({ lead, sale: chosen, matchedOn: matchedFields.join('|') });
       });
 
       return matches;
@@ -280,7 +280,7 @@
 
       const downloadMatches = () => {
         const rows = matches.map(m => ({
-          matched_on: m.matchedOn,
+          matched_on: m.matchedOn, // now includes 'name' when names match
           platform_offer: platformOfferLabel((m.lead?.[lPlatform] ?? '').toString()),
           revenue: m.sale?.[sRevenue] ?? '',
           lead_email: m.lead?.[lEmail] ?? '',
@@ -307,7 +307,7 @@
           <header className="mb-6">
             <h1 className="text-2xl md:text-3xl font-bold">Lead ⇄ Sales Matcher</h1>
             <p className="text-sm text-gray-600 mt-1">
-              Match when <strong>email OR phone</strong> matches • <strong>Name</strong> is used to disambiguate & noted in <em>matched_on</em> • De-duped by lead & sale • Platform names include Offer
+              Match when <strong>email OR phone</strong> matches • <strong>Name</strong> disambiguates and appears in <em>matched_on</em> when equal • De-duped by lead & sale • Platform names include Offer
             </p>
           </header>
 
@@ -337,10 +337,10 @@
                 </div>
               )}
               <div className="mt-4 grid grid-cols-2 gap-3">
-                <Select label="Leads: Email"        value={lEmail}     onChange={setLEmail}    options={leadsHeaders} />
-                <Select label="Leads: Phone"        value={lPhone}     onChange={setLPhone}    options={leadsHeaders} />
-                <Select label="Leads: Name"         value={lName}      onChange={setLName}     options={['', ...leadsHeaders]} />
-                <Select label="Leads: Platform+Offer" value={lPlatform} onChange={setLPlatform} options={leadsHeaders} />
+                <Select label="Leads: Email"          value={lEmail}     onChange={setLEmail}    options={leadsHeaders} />
+                <Select label="Leads: Phone"          value={lPhone}     onChange={setLPhone}    options={leadsHeaders} />
+                <Select label="Leads: Name"           value={lName}      onChange={setLName}     options={['', ...leadsHeaders]} />
+                <Select label="Leads: Platform+Offer" value={lPlatform}  onChange={setLPlatform} options={leadsHeaders} />
               </div>
             </div>
           </div>
@@ -442,7 +442,7 @@
           </div>
 
           <footer className="text-xs text-gray-500 mt-8">
-            <p>Rules: A lead matches a sale if <strong>email OR phone</strong> matches. <strong>Name</strong> is considered for tie-breaking and shown in <em>matched_on</em>, but does not match by itself.</p>
+            <p>Rules: A lead matches a sale if <strong>email OR phone</strong> matches. <strong>Name</strong> is considered for tie-breaking and appears in <em>matched_on</em> when equal; it doesn’t create a match by itself.</p>
             <p className="mt-2">Privacy: Everything runs in your browser. No uploads.</p>
           </footer>
         </div>
