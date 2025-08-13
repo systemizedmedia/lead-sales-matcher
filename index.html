@@ -228,7 +228,7 @@
       const [lPlatform, setLPlatform] = useState("");
 
       const ready = salesFile && leadsFile && sRevenue && lPlatform &&
-        (sEmail || sPhone) && (lEmail || lPhone); // name optional but considered
+        (sEmail || sPhone) && (lEmail || lPhone); // name used if provided
 
       // Matches (email OR phone, name-aware)
       const rawMatches = useMemo(() => {
@@ -323,7 +323,7 @@
               <div className="mt-4 grid grid-cols-2 gap-3">
                 <Select label="Sales: Email"     value={sEmail}    onChange={setSEmail}  options={salesHeaders} />
                 <Select label="Sales: Phone"     value={sPhone}    onChange={setSPhone}  options={salesHeaders} />
-                <Select label="Sales: Name (optional)" value={sName} onChange={setSName} options={['', ...salesHeaders]} />
+                <Select label="Sales: Name"      value={sName}     onChange={setSName}   options={['', ...salesHeaders]} />
                 <Select label="Sales: Revenue $" value={sRevenue}  onChange={setSRevenue} options={salesHeaders} />
               </div>
             </div>
@@ -337,9 +337,9 @@
                 </div>
               )}
               <div className="mt-4 grid grid-cols-2 gap-3">
-                <Select label="Leads: Email"     value={lEmail}     onChange={setLEmail}    options={leadsHeaders} />
-                <Select label="Leads: Phone"     value={lPhone}     onChange={setLPhone}    options={leadsHeaders} />
-                <Select label="Leads: Name (optional)" value={lName} onChange={setLName}   options={['', ...leadsHeaders]} />
+                <Select label="Leads: Email"        value={lEmail}     onChange={setLEmail}    options={leadsHeaders} />
+                <Select label="Leads: Phone"        value={lPhone}     onChange={setLPhone}    options={leadsHeaders} />
+                <Select label="Leads: Name"         value={lName}      onChange={setLName}     options={['', ...leadsHeaders]} />
                 <Select label="Leads: Platform+Offer" value={lPlatform} onChange={setLPlatform} options={leadsHeaders} />
               </div>
             </div>
@@ -474,7 +474,7 @@
           <label className="text-xs text-gray-600">{label}</label>
           <select value={value} onChange={(e) => onChange(e.target.value)} className="rounded-xl border px-3 py-2 text-sm">
             {options.map(opt =>
-              <option key={opt} value={opt}>{opt === '' ? '— Select —' : opt}</option>
+              <option key={opt} value={opt}>{opt === '' ? 'Select...' : opt}</option>
             )}
           </select>
         </div>
