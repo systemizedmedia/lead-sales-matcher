@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Lead ⇄ Sales Matcher (Email OR Phone + Name-aware)</title>
+  <title>Lead ⇄ Sales Matcher (Auto-Mapping)</title>
   <!-- Tailwind (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
   <!-- React 18 + ReactDOM (CDN) -->
@@ -16,7 +16,7 @@
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useMemo, useState } = React;
+    const { useMemo, useState, useEffect } = React;
 
     // ===== CSV Parsing =====
     function parseCSV(text) {
@@ -114,6 +114,82 @@
       document.body.removeChild(a); URL.revokeObjectURL(url);
     }
 
+    // ===== Auto-mapping helpers =====
+    const includesAny = (s, arr) => {
+      const t = s.toLowerCase();
+      return arr.some(k => t.includes(k));
+    };
+
+    function addComputedFullName(fileObj) {
+      const headers = fileObj.headers.map(h => h.toString());
+      const lower = headers.map(h => h.toLowerCase());
+      const fi = lower.findIndex(h => h.includes('first') && h.includes('name'));
+      const li = lower.findIndex(h => h.includes('last')  && h.includes('name'));
+      const hasFull = lower.findIndex(h => includesAny(h, ['full name','name'])) !== -1;
+      if (fi !== -1 && li !== -1 && !hasFull) {
+        const newHeader = 'FullName (computed)';
+        fileObj.headers = [...fileObj.headers, newHeader];
+        fileObj.data = fileObj.data.map(r => ({
+          ...r,
+          [newHeader]: `${(r[headers[fi]]||'').toString().trim()} ${(r[headers[li]]||'').toString().trim()}`.trim()
+        }));
+      }
+      return fileObj;
+    }
+
+    function guessEmail(headers) {
+      const h = headers.find(x => x && x.toString().toLowerCase().includes('email'));
+      return h || '';
+    }
+    function guessPhone(headers) {
+      const low = headers.map(h => (h||'').toString().toLowerCase());
+      const prefer = ['phone','mobile','cell','contact','tel','telephone'];
+      for (const p of prefer) {
+        const idx = low.findIndex(h => h.includes(p));
+        if (idx !== -1) return headers[idx];
+      }
+      return '';
+    }
+    function guessName(headers) {
+      const low = headers.map(h => (h||'').toString().toLowerCase());
+      const exact = ['name','full name','lead name','customer name','contact name'];
+      for (const t of exact) {
+        const idx = low.findIndex(h => h === t || h.includes(t));
+        if (idx !== -1) return headers[idx];
+      }
+      // fallback to computed if present
+      const compIdx = low.findIndex(h => h.includes('fullname (computed)'));
+      if (compIdx !== -1) return headers[compIdx];
+      return '';
+    }
+    function guessRevenue(headers) {
+      const low = headers.map(h => (h||'').toString().toLowerCase());
+      const prefer = [
+        'revenue','amount','sale amount','job amount','ticket','contract',
+        'total','price','invoiced','closed amount','invoice total','grand total'
+      ];
+      for (const p of prefer) {
+        const idx = low.findIndex(h => h.includes(p));
+        if (idx !== -1) return headers[idx];
+      }
+      return '';
+    }
+    function guessPlatform(headers) {
+      const low = headers.map(h => (h||'').toString().toLowerCase());
+      const strong = ['platform','source','lead source','utm_source','utm source','channel'];
+      for (const s of strong) {
+        const idx = low.findIndex(h => h.includes(s));
+        if (idx !== -1) return headers[idx];
+      }
+      // ok-ish fallbacks if teams name things by ad objects
+      const fallback = ['campaign','ad set','adset','ad name','campaign name','form name'];
+      for (const f of fallback) {
+        const idx = low.findIndex(h => h.includes(f));
+        if (idx !== -1) return headers[idx];
+      }
+      return '';
+    }
+
     // ===== Matching: email OR phone, with NAME used to refine/annotate =====
     function matchRecordsEmailOrPhone({ sales, leads, mapSales, mapLeads }) {
       const sEmail = mapSales.email, sPhone = mapSales.phone, sName = mapSales.name;
@@ -144,21 +220,17 @@
         const eCands = le ? (emailIdx.get(le) || []) : [];
         const pCands = lp ? (phoneIdx.get(lp) || []) : [];
 
-        // Require at least email OR phone candidate
         if (eCands.length === 0 && pCands.length === 0) return;
 
-        // Unique candidate set
         const candSet = new Set([ ...eCands, ...pCands ]);
         const cands = Array.from(candSet);
 
-        // Prefer a candidate whose NAME also matches (if both names provided)
         let chosen = null;
         if (sName && lName && ln) {
           chosen = cands.find(sale => normalizeName(sale?.[sName]) === ln) || null;
         }
         if (!chosen) chosen = cands[0];
 
-        // Figure out which fields matched for the chosen sale
         const matchedFields = [];
         if (le && eCands.includes(chosen)) matchedFields.push('email');
         if (lp && pCands.includes(chosen)) matchedFields.push('phone');
@@ -213,9 +285,6 @@
       const [salesFile, setSalesFile] = useState(null);
       const [leadsFile, setLeadsFile] = useState(null);
 
-      const salesHeaders = useMemo(() => salesFile?.headers || [], [salesFile]);
-      const leadsHeaders = useMemo(() => leadsFile?.headers || [], [leadsFile]);
-
       // Column mapping
       const [sEmail, setSEmail] = useState("");
       const [sPhone, setSPhone] = useState("");
@@ -227,8 +296,33 @@
       const [lName, setLName] = useState("");
       const [lPlatform, setLPlatform] = useState("");
 
+      // Build header lists
+      const salesHeaders = useMemo(() => salesFile?.headers || [], [salesFile]);
+      const leadsHeaders = useMemo(() => leadsFile?.headers || [], [leadsFile]);
+
+      // Auto-map on file load (Sales)
+      useEffect(() => {
+        if (!salesFile) return;
+        // only set if blank, so users can override
+        if (!sEmail)   setSEmail(guessEmail(salesFile.headers));
+        if (!sPhone)   setSPhone(guessPhone(salesFile.headers));
+        if (!sName)    setSName(guessName(salesFile.headers));
+        if (!sRevenue) setSRevenue(guessRevenue(salesFile.headers));
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [salesFile]);
+
+      // Auto-map on file load (Leads)
+      useEffect(() => {
+        if (!leadsFile) return;
+        if (!lEmail)    setLEmail(guessEmail(leadsFile.headers));
+        if (!lPhone)    setLPhone(guessPhone(leadsFile.headers));
+        if (!lName)     setLName(guessName(leadsFile.headers));
+        if (!lPlatform) setLPlatform(guessPlatform(leadsFile.headers));
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, [leadsFile]);
+
       const ready = salesFile && leadsFile && sRevenue && lPlatform &&
-        (sEmail || sPhone) && (lEmail || lPhone); // name used if provided
+        (sEmail || sPhone) && (lEmail || lPhone);
 
       // Matches (email OR phone, name-aware)
       const rawMatches = useMemo(() => {
@@ -280,7 +374,7 @@
 
       const downloadMatches = () => {
         const rows = matches.map(m => ({
-          matched_on: m.matchedOn, // now includes 'name' when names match
+          matched_on: m.matchedOn,
           platform_offer: platformOfferLabel((m.lead?.[lPlatform] ?? '').toString()),
           revenue: m.sale?.[sRevenue] ?? '',
           lead_email: m.lead?.[lEmail] ?? '',
@@ -307,14 +401,14 @@
           <header className="mb-6">
             <h1 className="text-2xl md:text-3xl font-bold">Lead ⇄ Sales Matcher</h1>
             <p className="text-sm text-gray-600 mt-1">
-              Match when <strong>email OR phone</strong> matches • <strong>Name</strong> disambiguates and appears in <em>matched_on</em> when equal • De-duped by lead & sale • Platform names include Offer
+              Auto-maps common columns • Match when <strong>email OR phone</strong> matches • <strong>Name</strong> disambiguates and appears in <em>matched_on</em> • De-duped by lead & sale • Platform names include Offer
             </p>
           </header>
 
           <div className="grid md:grid-cols-2 gap-6 mb-6">
             <div className="rounded-2xl border p-4 bg-white">
               <h2 className="font-semibold mb-3">1) Upload Sales CSV</h2>
-              <FilePicker label="Sales CSV" onLoad={setSalesFile} />
+              <FilePicker label="Sales CSV" onLoad={setSalesFile} augment />
               {salesFile && (
                 <div className="mt-3 text-xs text-gray-600">
                   Loaded <strong>{salesFile.fileName}</strong> with {salesFile.data.length.toLocaleString()} rows.
@@ -330,7 +424,7 @@
 
             <div className="rounded-2xl border p-4 bg-white">
               <h2 className="font-semibold mb-3">2) Upload Lead Database CSV</h2>
-              <FilePicker label="Leads CSV" onLoad={setLeadsFile} />
+              <FilePicker label="Leads CSV" onLoad={setLeadsFile} augment />
               {leadsFile && (
                 <div className="mt-3 text-xs text-gray-600">
                   Loaded <strong>{leadsFile.fileName}</strong> with {leadsFile.data.length.toLocaleString()} rows.
@@ -343,6 +437,10 @@
                 <Select label="Leads: Platform+Offer" value={lPlatform}  onChange={setLPlatform} options={leadsHeaders} />
               </div>
             </div>
+          </div>
+
+          <div className="mb-2 text-xs text-gray-500">
+            Tip: Auto-mapping runs once after each file loads. You can override any dropdown.
           </div>
 
           <div className="flex flex-wrap gap-4 mb-6">
@@ -442,7 +540,7 @@
           </div>
 
           <footer className="text-xs text-gray-500 mt-8">
-            <p>Rules: A lead matches a sale if <strong>email OR phone</strong> matches. <strong>Name</strong> is considered for tie-breaking and appears in <em>matched_on</em> when equal; it doesn’t create a match by itself.</p>
+            <p>Rules: A lead matches a sale if <strong>email OR phone</strong> matches. <strong>Name</strong> is used to break ties and appears in <em>matched_on</em> when equal; it doesn’t create a match by itself.</p>
             <p className="mt-2">Privacy: Everything runs in your browser. No uploads.</p>
           </footer>
         </div>
@@ -450,14 +548,23 @@
     }
 
     // ===== Reusable UI components =====
-    function FilePicker({ label, onLoad }) {
+    function FilePicker({ label, onLoad, augment }) {
       const handle = async (e) => {
         const file = e.target.files?.[0];
         if (!file) return;
         const text = await file.text();
-        const rows = parseCSV(text);
-        const objs = toObjects(rows);
-        onLoad({ fileName: file.name, headers: rows[0], data: objs });
+        let rows = parseCSV(text);
+        let objs = toObjects(rows);
+        let headers = rows[0];
+
+        // Optionally add computed FullName if First/Last present
+        if (augment) {
+          const temp = { fileName: file.name, headers: [...headers], data: objs };
+          const augmented = addComputedFullName(temp);
+          headers = augmented.headers;
+          objs = augmented.data;
+        }
+        onLoad({ fileName: file.name, headers, data: objs });
       };
       return (
         <div className="flex flex-col gap-2">
