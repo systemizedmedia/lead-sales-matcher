@@ -3,10 +3,13 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Lead ⇄ Sales Matcher (Platforms + Offers + Name-aware)</title>
+  <title>Lead ⇄ Sales Matcher (No “Unknown”, Name-aware)</title>
+  <!-- Tailwind (CDN) -->
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React 18 + ReactDOM (CDN) -->
   <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <!-- Babel for JSX in this one-file build -->
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
 <body class="min-h-screen bg-gray-50 text-gray-900">
@@ -50,7 +53,11 @@
     const normalizeEmail = (e) => (e || '').toString().trim().toLowerCase();
     const normalizePhone = (p) => (p || '').toString().replace(/\D+/g, '').replace(/^1(\d{10})$/, '$1');
 
-    // Robust, order-insensitive name key
+    // Robust, order-insensitive name key:
+    // - lowercases, strips accents & punctuation
+    // - drops titles/suffixes (mr/mrs/ms/dr/jr/sr/ii/iii/iv/rev/prof)
+    // - removes 1-char initials
+    // - sorts tokens so "Doe, John" == "John Doe"
     function nameKey(raw) {
       if (!raw) return '';
       let s = raw.toString().normalize('NFD').replace(/[\u0300-\u036f]/g,'');
@@ -64,15 +71,15 @@
     // Token boundary helper (avoids "loyalty" => YT)
     const tokenRegex = (t) => new RegExp(`(^|[^a-z])${t}([^a-z]|$)`, 'i');
     const toTitle = (s) => s.replace(/\s+/g,' ').trim().replace(/\b\w/g, c => c.toUpperCase());
+    const normSimple = s => (s||'').toString().toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 
     // ===== Platform + Offer parsing from the SAME field =====
     function canonicalizePlatform(raw) {
       const s = (raw || '').toString().trim();
-      if (!s) return 'Unknown';
       if (/you\s*tube/i.test(s) || tokenRegex('yt').test(s)) return 'Youtube';
       if (/face\s*book/i.test(s) || tokenRegex('fb').test(s)) return 'Facebook';
       if (/tik\s*tok/i.test(s) || tokenRegex('tt').test(s)) return 'Tiktok';
-      return s;
+      return s; // show original if not a known token
     }
 
     function stripPlatformTokens(raw) {
@@ -90,16 +97,22 @@
 
     function deriveOfferFromPlatformField(raw) {
       const leftover = stripPlatformTokens(raw);
-      if (!leftover) return 'Unknown';
+      if (!leftover) return ''; // no “Unknown”
       if (/free\s*quote/i.test(leftover) || tokenRegex('fq').test(leftover)) return 'Free Quote';
       if (/tune\s*up/i.test(leftover)    || tokenRegex('tup').test(leftover)) return 'Tune Up';
       return toTitle(leftover);
     }
 
     function platformOfferLabel(raw) {
-      const p = canonicalizePlatform(raw);
-      const o = deriveOfferFromPlatformField(raw);
-      return `${p} — ${o}`;
+      const original = (raw || '').toString().trim();
+      const p = canonicalizePlatform(original);
+      const o = deriveOfferFromPlatformField(original);
+
+      // If no offer, or offer collapses to platform, show just the original (or the normalized platform if detected)
+      if (!o || normSimple(o) === normSimple(p)) return original || p || '';
+
+      // Prefer normalized platform for YT/FB/TT; fall back to original text otherwise
+      return `${p || original} — ${o}`;
     }
 
     // ===== Utils =====
@@ -200,6 +213,7 @@
       const sEmail = mapSales.email, sPhone = mapSales.phone, sName = mapSales.name;
       const lEmail = mapLeads.email, lPhone = mapLeads.phone, lName = mapLeads.name;
 
+      // Index sales by email/phone -> arrays (to handle duplicates)
       const emailIdx = new Map(), phoneIdx = new Map();
       const pushMap = (map, key, val) => {
         if (!key) return;
@@ -274,7 +288,7 @@
       const seenSales = new Set();
       matches.forEach(m => {
         const raw = (m.lead?.[platformKey] ?? '').toString();
-        const label = (labelFn ? labelFn(raw) : raw) || 'Unknown';
+        const label = (labelFn ? labelFn(raw) : raw) || ''; // no "Unknown" fallback
         const revenueRaw = m.sale?.[revenueKey];
         const revenue = parseFloat((revenueRaw ?? '').toString().replace(/[^0-9.\-]/g, '')) || 0;
 
@@ -288,28 +302,36 @@
       return Array.from(map.values()).sort((a,b) => b.revenue - a.revenue);
     }
 
-    // Platform-only summary with an "Other" bucket
+    // Platform-only summary: fixed buckets for YT/FB/TT first, then every other distinct value by its original text
     function groupByPlatformOnly(matches, platformKey, revenueKey, saleKeyFn) {
       const targets = ['Youtube', 'Facebook', 'Tiktok'];
-      const map = new Map([...targets, 'Other'].map(p => [p, { label: p, leads: 0, revenue: 0 }]));
-      const seenSales = new Set(); // de-dup revenue across all rows
+      const targetMap = new Map(targets.map(p => [p, { label: p, leads: 0, revenue: 0 }]));
+      const otherMap = new Map(); // dynamic buckets using the original field text
+      const seenSales = new Set(); // de-dup revenue across the whole table
 
       matches.forEach(m => {
-        const raw = (m.lead?.[platformKey] ?? '').toString();
-        const plat = canonicalizePlatform(raw);
-        const bucket = targets.includes(plat) ? plat : 'Other';
+        const rawOriginal = (m.lead?.[platformKey] ?? '').toString().trim();
+        const guess = canonicalizePlatform(rawOriginal);
+        const bucket = targets.includes(guess) ? guess : rawOriginal;
 
         const revenueRaw = m.sale?.[revenueKey];
         const revenue = parseFloat((revenueRaw ?? '').toString().replace(/[^0-9.\-]/g, '')) || 0;
 
-        const obj = map.get(bucket);
+        const container = targets.includes(bucket) ? targetMap : otherMap;
+        if (!container.has(bucket)) container.set(bucket, { label: bucket, leads: 0, revenue: 0 });
+
+        const obj = container.get(bucket);
         obj.leads += 1;
 
         const k = saleKeyFn(m.sale);
         if (!seenSales.has(k)) { obj.revenue += revenue; seenSales.add(k); }
       });
 
-      return [...targets, 'Other'].map(p => map.get(p));
+      // Return targets first (fixed order), then the rest alphabetically
+      return [
+        ...targets.map(p => targetMap.get(p)),
+        ...Array.from(otherMap.values()).sort((a,b) => (a.label || '').localeCompare(b.label || ''))
+      ];
     }
 
     function App() {
@@ -327,7 +349,7 @@
       const [lName, setLName] = useState("");
       const [lPlatform, setLPlatform] = useState("");
 
-      // Build header lists
+      // Headers
       const salesHeaders = useMemo(() => salesFile?.headers || [], [salesFile]);
       const leadsHeaders = useMemo(() => leadsFile?.headers || [], [leadsFile]);
 
@@ -381,13 +403,12 @@
       // sale-key for revenue de-dup
       const saleKey = useMemo(() => makeSaleKeyFactory(sEmail, sPhone, sName, sRevenue), [sEmail, sPhone, sName, sRevenue]);
 
-      // Combined Platform (Offer) summary
+      // Summaries
       const platformOfferSummary = useMemo(() => {
         if (!ready) return [];
         return groupByPlatformOfferSummary(matches, lPlatform, sRevenue, saleKey, platformOfferLabel);
       }, [matches, ready, lPlatform, sRevenue, saleKey]);
 
-      // Platform-only summary (YT/FB/TT + Other)
       const platformOnlySummary = useMemo(() => {
         if (!ready) return [];
         return groupByPlatformOnly(matches, lPlatform, sRevenue, saleKey);
@@ -408,6 +429,7 @@
         return sum;
       }, [matches, sRevenue, saleKey]);
 
+      // Downloads
       const downloadMatches = () => {
         const rows = matches.map(m => ({
           matched_on: m.matchedOn,
@@ -448,7 +470,7 @@
           <header className="mb-6">
             <h1 className="text-2xl md:text-3xl font-bold">Lead ⇄ Sales Matcher</h1>
             <p className="text-sm text-gray-600 mt-1">
-              Auto-maps common columns • Match when <strong>email OR phone</strong> matches • <strong>Name</strong> disambiguates (order/format insensitive) and appears in <em>matched_on</em> • De-duped by lead & sale • Platform names include Offer
+              Auto-maps common columns • Match when <strong>email OR phone</strong> matches • <strong>Name</strong> disambiguates (order/format insensitive) and appears in <em>matched_on</em> • De-duped by lead & sale • Platform names include Offer (falls back to original text, no “Unknown”)
             </p>
           </header>
 
@@ -525,7 +547,9 @@
           <div className="rounded-2xl border bg-white">
             <div className="p-4 border-b flex items-center justify-between">
               <h3 className="font-semibold">Platform (Offer) Summary</h3>
-              <div className="text-xs text-gray-500">Platforms: Youtube, Facebook, Tiktok • Offers: Free Quote, Tune Up (fallback: “as is”)</div>
+              <div className="text-xs text-gray-500">
+                YouTube/Facebook/TikTok are normalized; otherwise we show your original field text. Offers detected: Free Quote (FQ), Tune Up (TUP); otherwise we keep the original text (no “Unknown”).
+              </div>
             </div>
             <div className="p-4 overflow-x-auto">
               <table className="min-w-full text-sm">
@@ -539,7 +563,7 @@
                 <tbody>
                   {platformOfferSummary.map((r, idx) => (
                     <tr key={idx} className="border-t">
-                      <td className="px-3 py-2">{r.label}</td>
+                      <td className="px-3 py-2">{r.label || ' '}</td>
                       <td className="px-3 py-2">{r.leads.toLocaleString()}</td>
                       <td className="px-3 py-2">${r.revenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
                     </tr>
@@ -552,11 +576,13 @@
             </div>
           </div>
 
-          {/* Platform-only Summary (YT/FB/TT + Other) */}
+          {/* Platform-only Summary (YT/FB/TT first, others keep original text) */}
           <div className="rounded-2xl border bg-white mt-6">
             <div className="p-4 border-b flex items-center justify-between">
-              <h3 className="font-semibold">Platform Summary (Youtube / Facebook / Tiktok / Other)</h3>
-              <div className="text-xs text-gray-500">Counts & revenue are deduped by sale.</div>
+              <h3 className="font-semibold">Platform Summary</h3>
+              <div className="text-xs text-gray-500">
+                Targets: Youtube / Facebook / Tiktok • All other values keep their original names. Revenue de-duped by sale.
+              </div>
             </div>
             <div className="p-4 overflow-x-auto">
               <table className="min-w-full text-sm">
@@ -570,7 +596,7 @@
                 <tbody>
                   {platformOnlySummary.map((r, idx) => (
                     <tr key={idx} className="border-t">
-                      <td className="px-3 py-2">{r.label}</td>
+                      <td className="px-3 py-2">{r.label || ' '}</td>
                       <td className="px-3 py-2">{r.leads.toLocaleString()}</td>
                       <td className="px-3 py-2">${r.revenue.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
                     </tr>
@@ -637,7 +663,7 @@
           </div>
 
           <footer className="text-xs text-gray-500 mt-8">
-            <p>Rules: A lead matches a sale if <strong>email OR phone</strong> matches. <strong>Name</strong> is used to break ties and appears in <em>matched_on</em> when equal (order/format insensitive); it doesn’t create a match by itself.</p>
+            <p>Rules: A lead matches a sale if <strong>email OR phone</strong> matches. <strong>Name</strong> helps disambiguate and appears in <em>matched_on</em> when equal (order/format insensitive); it doesn’t create a match by itself.</p>
             <p className="mt-2">Privacy: Everything runs in your browser. No uploads.</p>
           </footer>
         </div>
